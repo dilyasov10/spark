@@ -1,0 +1,16 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Datasource URL живёт в prisma.config.ts (Prisma 7), а не здесь.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+  // NestJS собирается в CommonJS; без этого генератор выдаёт ESM с
+  // import.meta.url, и dist падает на старте.
+  moduleFormat = "cjs"
+}
+
+datasource db {
+  provider = "postgresql"
+}
