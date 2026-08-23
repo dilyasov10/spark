@@ -27,3 +27,9 @@ Thumbs.db
 # Tests & Build cache
 coverage
 *.tsbuildinfo
+
+# Generated Prisma Client
+/src/generated
+
+# Agent instructions
+CLAUDE.md
