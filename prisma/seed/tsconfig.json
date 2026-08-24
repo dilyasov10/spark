@@ -1,0 +1,10 @@
+{
+  // Сгенерированный клиент Prisma импортирует соседние файлы с расширением
+  // .js ("./internal/class.js"). В dist они такими и становятся, но ts-node
+  // запускает исходники — experimentalResolver отображает .js обратно на .ts.
+  "extends": "../../tsconfig.json",
+  "ts-node": {
+    "transpileOnly": true,
+    "experimentalResolver": true
+  }
+}

@@ -31,6 +31,46 @@
 $ pnpm install
 ```
 
+## База данных
+
+Postgres на Neon через Prisma 7. Скопируйте `.env.example` в `.env` и заполните оба URL:
+`DATABASE_URL` — pooled-эндпоинт (по нему ходит приложение), `DIRECT_URL` — direct-эндпоинт
+(по нему ходят Prisma CLI и сид; миграции через pooler ломаются).
+
+```bash
+# сгенерировать клиент (после pnpm install и после любой правки схемы)
+$ pnpm db:generate
+
+# применить миграции
+$ pnpm db:migrate
+
+# наполнить базу тестовыми данными
+$ pnpm db:seed
+
+# просмотреть данные в браузере
+$ pnpm db:studio
+```
+
+### Тестовые данные
+
+`pnpm db:seed` разворачивает 8 пользователей и 20 постов (17 опубликованных и 3 черновика),
+каждый пост связан с автором через `Post.authorId`. Пароль у всех фиктивных аккаунтов
+одинаковый — `Password123!`.
+
+Скрипт **идемпотентен**: идентификаторы записей зафиксированы в
+[prisma/seed/users.ts](prisma/seed/users.ts) и [prisma/seed/posts.ts](prisma/seed/posts.ts),
+запись идёт через `upsert` в одной транзакции. Повторный запуск обновляет те же строки —
+дубликатов не появляется, счётчики остаются 8 и 20.
+
+Скрипт **не запускается на продакшне**: перед подключением к базе он проверяет окружение
+и падает с ошибкой, если видит `NODE_ENV=production`, `VERCEL_ENV=production`,
+`RAILWAY_ENVIRONMENT=production`, `RENDER` или `FLY_APP_NAME`. Флага-обхода нет.
+
+```bash
+$ NODE_ENV=production pnpm db:seed
+Сид данных не выполнен: Сид данных запрещён вне локального окружения. Признаки продакшна: NODE_ENV=production.
+```
+
 ## Compile and run the project
 
 ```bash
