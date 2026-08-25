@@ -1,0 +1,35 @@
+# Docker не читает .gitignore. Без этих строк .env с боевыми кредами Neon
+# уехал бы внутрь образа, а образ пушится в реестр.
+.env
+.env.*
+!.env.example
+
+# Ставится и собирается внутри образа
+node_modules
+dist
+build
+
+# Клиент Prisma генерируется в образе (pnpm db:generate)
+src/generated
+
+# В рантайме не нужны
+test
+**/*.spec.ts
+coverage
+*.tsbuildinfo
+
+# Инфраструктура: используется Jenkins-агентом, внутри образа не нужна
+Dockerfile
+.dockerignore
+Jenkinsfile
+deployment.yaml
+preparingDeploy.sh
+
+.git
+.gitignore
+.claude
+.idea
+.vscode
+*.log
+README.md
+CLAUDE.md
