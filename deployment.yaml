@@ -22,5 +22,15 @@ spec:
              allowPrivilegeEscalation: false
              runAsNonRoot: true      # опционально, но хорошая практика
              runAsUser: 1000         # опционально
+           # Секреты живут в объекте Secret, а не в манифесте: этот файл лежит
+           # в git. Создаётся отдельно, вне пайплайна (см. README деплоя).
+           # Без DATABASE_URL приложение падает на старте: PrismaService
+           # вызывает getOrThrow, и под уходит в CrashLoopBackOff.
+           envFrom:
+             - secretRef:
+                 name: nest-backend-secrets
+           env:
+             - name: PORT
+               value: "PORT_CONTAINER"
            ports:
              - containerPort: PORT_CONTAINER
