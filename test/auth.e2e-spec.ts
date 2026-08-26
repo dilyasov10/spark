@@ -11,12 +11,7 @@ import { ApiErrorDto } from '../src/common/dto/api-error.dto';
 import { ERROR_CODE } from '../src/common/errors/error-code';
 import { PrismaService } from '../src/prisma/prisma.service';
 
-// Секреты задаём до сборки модуля: dotenv не перезаписывает уже выставленные
-// переменные, поэтому прогон не зависит от содержимого .env.
-process.env.JWT_ACCESS_SECRET = 'e2e-access-secret';
-process.env.JWT_ACCESS_EXPIRES_IN = '15m';
-process.env.JWT_REFRESH_SECRET = 'e2e-refresh-secret';
-process.env.JWT_REFRESH_EXPIRES_IN = '7d';
+// Секреты общие для всех e2e-спек и выставляются в test/setup-e2e.ts.
 
 const PASSWORD = 'Password123!';
 const CREATED_AT = '2026-01-17T08:42:00.000Z';
