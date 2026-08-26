@@ -56,12 +56,13 @@ pipeline {
             }
         }
         stage('e2e tests') {
-            environment {
-                // test/app.e2e-spec.ts поднимает настоящий AppModule, а
-                // PrismaService делает getOrThrow('DATABASE_URL') — без
-                // переменной стадия падает на старте модуля.
-                DATABASE_URL = credentials('neon-database-url')
-            }
+            // Переменные окружения стадии не нужны: ни один e2e-тест в базу не
+            // ходит, PrismaService везде подменяется заглушкой. Живого
+            // DATABASE_URL здесь стоял credential 'neon-database-url', но
+            // биндинг вычисляется до тела стадии — при отсутствии credential в
+            // Jenkins сборка обрывалась с `ERROR: neon-database-url`, не
+            // запустив ни одной команды. Вернуть, когда появятся тесты,
+            // которым нужна настоящая БД.
             steps {
                 script {
                     sh '''
