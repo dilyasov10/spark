@@ -49,6 +49,7 @@ export class AuthService {
    * Проверяет учётные данные и выпускает пару токенов.
    *
    * @throws AppException `INVALID_CREDENTIALS` со статусом 401
+   * @throws AppException `EMAIL_NOT_CONFIRMED` со статусом 401
    */
   async login(dto: LoginDto): Promise<TokenPair> {
     const user = await this.prisma.user.findUnique({
@@ -69,6 +70,18 @@ export class AuthService {
         code: AUTH_ERROR_CODE.INVALID_CREDENTIALS,
         message: AUTH_ERROR_MESSAGE.INVALID_CREDENTIALS,
         // Без явного статуса AppException отдал бы 400.
+        status: HttpStatus.UNAUTHORIZED,
+      });
+    }
+
+    // Проверяется после сверки пароля, а не вместе с ней: иначе по ответу
+    // можно было бы узнать, что email зарегистрирован, не зная пароля, — тот
+    // самый оракул, ради которого выше считается DUMMY_PASSWORD_HASH. Здесь
+    // отдельный код уже безопасен: до него доходит только владелец аккаунта.
+    if (!user.isConfirmed) {
+      throw new AppException({
+        code: AUTH_ERROR_CODE.EMAIL_NOT_CONFIRMED,
+        message: AUTH_ERROR_MESSAGE.EMAIL_NOT_CONFIRMED,
         status: HttpStatus.UNAUTHORIZED,
       });
     }

@@ -17,6 +17,12 @@ export const AUTH_ERROR_CODE = {
    * обновить, а не показывать форму входа.
    */
   TOKEN_EXPIRED: 'TOKEN_EXPIRED',
+  /**
+   * Пароль сошёлся, но email ещё не подтверждён. Отдельно от
+   * `INVALID_CREDENTIALS`: фронту нужно предложить переотправку письма, а не
+   * форму входа заново.
+   */
+  EMAIL_NOT_CONFIRMED: 'EMAIL_NOT_CONFIRMED',
 } as const;
 
 export type AuthErrorCode =
@@ -25,4 +31,6 @@ export type AuthErrorCode =
 export const AUTH_ERROR_MESSAGE = {
   INVALID_CREDENTIALS: 'Неверный email или пароль',
   TOKEN_EXPIRED: 'Срок действия токена истёк. Войдите заново',
+  EMAIL_NOT_CONFIRMED:
+    'Email не подтверждён. Перейдите по ссылке из письма или запросите новое',
 } as const;

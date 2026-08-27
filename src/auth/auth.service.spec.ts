@@ -65,9 +65,17 @@ describe('AuthService', () => {
     jest.restoreAllMocks();
   });
 
+  /** Обычный пользователь с подтверждённым email — успешный вход возможен только для такого. */
+  const confirmedUser = () => ({
+    id: USER_ID,
+    email: EMAIL,
+    passwordHash,
+    isConfirmed: true,
+  });
+
   it('возвращает пару токенов при верных учётных данных', async () => {
     // Arrange
-    findUnique.mockResolvedValue({ id: USER_ID, email: EMAIL, passwordHash });
+    findUnique.mockResolvedValue(confirmedUser());
 
     // Act
     const tokens = await service.login({
@@ -84,7 +92,7 @@ describe('AuthService', () => {
 
   it('кладёт в payload только id и email', async () => {
     // Arrange
-    findUnique.mockResolvedValue({ id: USER_ID, email: EMAIL, passwordHash });
+    findUnique.mockResolvedValue(confirmedUser());
 
     // Act
     await service.login({ email: EMAIL, password: VALID_PASSWORD });
@@ -99,7 +107,7 @@ describe('AuthService', () => {
 
   it('подписывает refresh-токен отдельным секретом', async () => {
     // Arrange
-    findUnique.mockResolvedValue({ id: USER_ID, email: EMAIL, passwordHash });
+    findUnique.mockResolvedValue(confirmedUser());
 
     // Act
     await service.login({ email: EMAIL, password: VALID_PASSWORD });
@@ -129,7 +137,7 @@ describe('AuthService', () => {
 
   it('кидает INVALID_CREDENTIALS со статусом 401, когда пароль неверный', async () => {
     // Arrange
-    findUnique.mockResolvedValue({ id: USER_ID, email: EMAIL, passwordHash });
+    findUnique.mockResolvedValue(confirmedUser());
 
     // Act
     const error = await captureError(
@@ -142,14 +150,41 @@ describe('AuthService', () => {
     expect(error.getStatus()).toBe(HttpStatus.UNAUTHORIZED);
   });
 
+  it('кидает EMAIL_NOT_CONFIRMED со статусом 401, когда email не подтверждён', async () => {
+    // Arrange
+    findUnique.mockResolvedValue({ ...confirmedUser(), isConfirmed: false });
+
+    // Act
+    const error = await captureError(
+      service.login({ email: EMAIL, password: VALID_PASSWORD }),
+    );
+
+    // Assert
+    expect(error).toBeInstanceOf(AppException);
+    expect(error.code).toBe(AUTH_ERROR_CODE.EMAIL_NOT_CONFIRMED);
+    expect(error.getStatus()).toBe(HttpStatus.UNAUTHORIZED);
+    expect(signAsync).not.toHaveBeenCalled();
+  });
+
+  it('не выдаёт EMAIL_NOT_CONFIRMED без верного пароля: неподтверждённый аккаунт не раскрывается', async () => {
+    // Arrange
+    findUnique.mockResolvedValue({ ...confirmedUser(), isConfirmed: false });
+
+    // Act
+    const error = await captureError(
+      service.login({ email: EMAIL, password: WRONG_PASSWORD }),
+    );
+
+    // Assert
+    // Проверка isConfirmed идёт после сверки пароля, поэтому чужой email
+    // отвечает так же, как незарегистрированный.
+    expect(error.code).toBe(AUTH_ERROR_CODE.INVALID_CREDENTIALS);
+  });
+
   it('не раскрывает, зарегистрирован ли email: ответы на оба отказа совпадают', async () => {
     // Arrange
     findUnique.mockResolvedValueOnce(null);
-    findUnique.mockResolvedValueOnce({
-      id: USER_ID,
-      email: EMAIL,
-      passwordHash,
-    });
+    findUnique.mockResolvedValueOnce(confirmedUser());
 
     // Act
     const unknownEmailError = await captureError(

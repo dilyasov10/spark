@@ -39,8 +39,13 @@ describe('Авторизация (e2e)', () => {
     // и фильтр остаются настоящими — их поведение и проверяем.
     const findUnique = jest.fn((args: FindUniqueArgs) => {
       if (args.where.email !== undefined) {
+        // Поиск по email — это логин: он читает всю строку, включая
+        // passwordHash и isConfirmed. Профиль ниже идёт по id с узким select,
+        // где этих полей нет, поэтому в USER их и не держим.
         return Promise.resolve(
-          args.where.email === USER.email ? { ...USER, passwordHash } : null,
+          args.where.email === USER.email
+            ? { ...USER, passwordHash, isConfirmed: true }
+            : null,
         );
       }
 
