@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { HttpStatus, Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import * as bcrypt from 'bcrypt';
 import { randomUUID } from 'node:crypto';
@@ -126,6 +126,9 @@ export class AuthService {
       throw new AppException({
         code: ERROR_CODE.USER_NOT_FOUND,
         message: 'User not found',
+        // Без явного статуса AppException отдал бы 400, а по правилу 6
+        // «ресурс не найден» — это 404.
+        status: HttpStatus.NOT_FOUND,
         details: [{ field: 'email', message: 'User not found' }],
       });
     }

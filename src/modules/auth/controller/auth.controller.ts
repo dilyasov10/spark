@@ -41,7 +41,7 @@ export class AuthController {
     status: HttpStatus.NO_CONTENT,
     description: 'Confirmation email resent',
   })
-  @ApiErrorResponses(HttpStatus.BAD_REQUEST)
+  @ApiErrorResponses(HttpStatus.BAD_REQUEST, HttpStatus.NOT_FOUND)
   async registrationEmailResending(
     @Body() dto: RegistrationEmailResendingDto,
   ): Promise<void> {
