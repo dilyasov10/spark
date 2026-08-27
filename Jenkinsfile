@@ -151,8 +151,31 @@ pipeline {
              steps {
                  withKubeConfig([credentialsId: 'prod-kubernetes']) {
                     sh 'kubectl apply -f deployment.yaml'
-                    sh "kubectl rollout status deployment/${env.DEPLOYMENT_NAME} --namespace=${env.NAMESPACE}"
-                    sh "kubectl get services -o wide"
+
+                    // `rollout status` при неподнявшемся поде отваливается по
+                    // таймауту с `exceeded its progress deadline` — причину он
+                    // не показывает. Ловим падение и выводим состояние пода:
+                    // CrashLoopBackOff (нет Secret, приложение упало на старте)
+                    // и ImagePullBackOff (образ недоступен) выглядят в статусе
+                    // стадии одинаково, а лечатся по-разному.
+                    script {
+                        try {
+                            sh "kubectl rollout status deployment/${env.DEPLOYMENT_NAME} --namespace=${env.NAMESPACE} --timeout=120s"
+                        } catch (rolloutError) {
+                            sh "kubectl get pods -n ${env.NAMESPACE} -o wide"
+                            sh "kubectl describe deployment/${env.DEPLOYMENT_NAME} -n ${env.NAMESPACE}"
+                            sh "kubectl describe pods -l project=${env.PROJECT} -n ${env.NAMESPACE}"
+                            // Логи есть не всегда: при ImagePullBackOff
+                            // контейнер не стартовал, и команда вернёт ошибку —
+                            // она не должна перебивать исходную.
+                            sh "kubectl logs -l project=${env.PROJECT} -n ${env.NAMESPACE} --tail=100 --all-containers || true"
+                            sh "kubectl get secret nest-backend-secrets -n ${env.NAMESPACE} || true"
+
+                            throw rolloutError
+                        }
+                    }
+
+                    sh "kubectl get services -n ${env.NAMESPACE} -o wide"
                  }
              }
         }
