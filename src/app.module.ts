@@ -3,13 +3,21 @@ import { ConfigModule } from '@nestjs/config';
 import { APP_FILTER, APP_PIPE } from '@nestjs/core';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
+import { AuthModule } from './auth/auth.module';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
 import { createValidationPipe } from './common/validation/validation-pipe.factory';
-import { AuthModule } from './modules/auth/auth.module';
+// Регистрация живёт в отдельном модуле от JWT-логина, но класс там тоже
+// назван AuthModule — разводим псевдонимом, пока модули не объединены.
+import { AuthModule as RegistrationModule } from './modules/auth/auth.module';
 import { PrismaModule } from './prisma/prisma.module';
 
 @Module({
-  imports: [ConfigModule.forRoot({ isGlobal: true }), PrismaModule, AuthModule],
+  imports: [
+    ConfigModule.forRoot({ isGlobal: true }),
+    PrismaModule,
+    AuthModule,
+    RegistrationModule,
+  ],
   controllers: [AppController],
   providers: [
     AppService,

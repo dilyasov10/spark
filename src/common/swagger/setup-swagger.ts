@@ -1,8 +1,13 @@
 import { INestApplication } from '@nestjs/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
+import { API_PREFIX } from '../bootstrap/setup-app';
 import { ApiErrorDto, ErrorDetailDto } from '../dto/api-error.dto';
 
-export const SWAGGER_PATH = 'api/docs';
+/**
+ * `SwaggerModule.setup` вешает маршрут в обход глобального префикса, поэтому
+ * префикс подставляем сами — адрес UI остаётся `/api/docs`.
+ */
+export const SWAGGER_PATH = `${API_PREFIX}/docs`;
 
 /**
  * Swagger — единственный источник правды по API (CLAUDE.md, правило 7).
