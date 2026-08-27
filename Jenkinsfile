@@ -1,5 +1,28 @@
 def app
 
+/**
+ * Собирается ли сейчас ветка main — от этого зависят стадии сборки образа и
+ * деплоя.
+ *
+ * Раньше стояло `when { branch 'main' }`, но эта проверка смотрит в
+ * BRANCH_NAME, а её выставляет только Multibranch Pipeline. В классической
+ * Pipeline-джобе переменная пуста, условие ложно всегда, и деплойные стадии
+ * молча пропускались даже на зелёной сборке. Поэтому смотрим ещё и в
+ * GIT_BRANCH — её заполняет git-плагин, и в джобе с Branch Specifier `*​/main`
+ * там будет `origin/main`.
+ *
+ * Сборка пул-реквеста отсекается явно и первой: ghprb собирает merge-ref
+ * (`origin/pr/N/merge`), код в нём ещё не смержен, и в прод ему нельзя
+ * независимо от того, что окажется в остальных переменных.
+ */
+def isMainBuild() {
+    if (env.ghprbPullId || env.CHANGE_ID) {
+        return false
+    }
+
+    return env.BRANCH_NAME == 'main' || (env.GIT_BRANCH ?: '') ==~ /(origin\/)?main/
+}
+
 pipeline {
     agent any
     environment {
@@ -22,6 +45,11 @@ pipeline {
         stage('Clone repository') {
             steps {
                 checkout scm
+                // Пропуск деплойных стадий выглядит в Stage View одинаково при
+                // любой причине. Печатаем решение и его входные данные, чтобы
+                // не гадать по логу.
+                echo "BRANCH_NAME=${env.BRANCH_NAME} GIT_BRANCH=${env.GIT_BRANCH} ghprbPullId=${env.ghprbPullId}"
+                echo "Деплойные стадии: ${isMainBuild() ? 'выполняются' : 'пропускаются'}"
             }
         }
         stage('Install dependencies') {
@@ -75,7 +103,7 @@ pipeline {
             }
         }
         stage('Build docker image') {
-            when { branch 'main' }
+            when { expression { isMainBuild() } }
             steps {
                 echo "Build image started..."
                     script {
@@ -85,7 +113,7 @@ pipeline {
             }
         }
         stage('Push docker image') {
-             when { branch 'main' }
+             when { expression { isMainBuild() } }
              steps {
                  echo "Push image started..."
                      script {
@@ -97,7 +125,7 @@ pipeline {
              }
        }
        stage('Delete image local') {
-             when { branch 'main' }
+             when { expression { isMainBuild() } }
              steps {
                  script {
                     sh "docker rmi -f ${env.DOCKER_BUILD_NAME}"
@@ -105,7 +133,7 @@ pipeline {
              }
         }
         stage('Preparing deployment') {
-             when { branch 'main' }
+             when { expression { isMainBuild() } }
              steps {
                  echo "Preparing started..."
                      sh 'ls -ltr'
@@ -116,7 +144,7 @@ pipeline {
              }
         }
         stage('Deploy to Kubernetes') {
-             when { branch 'main' }
+             when { expression { isMainBuild() } }
              steps {
                  withKubeConfig([credentialsId: 'prod-kubernetes']) {
                     sh 'kubectl apply -f deployment.yaml'
