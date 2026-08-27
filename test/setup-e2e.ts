@@ -16,3 +16,11 @@ process.env.JWT_ACCESS_SECRET = 'e2e-access-secret';
 process.env.JWT_ACCESS_EXPIRES_IN = '15m';
 process.env.JWT_REFRESH_SECRET = 'e2e-refresh-secret';
 process.env.JWT_REFRESH_EXPIRES_IN = '7d';
+
+// То же самое для почты: `EmailService` читает креды в конструкторе, то есть
+// снова на инициализации `AppModule`. Без них не поднимается всё приложение,
+// а не только регистрация. Транспорт nodemailer при создании никуда не ходит —
+// соединение открывается только на отправке, которой в спеках нет.
+process.env.EMAIL_USER = 'e2e@example.com';
+process.env.EMAIL_PASS = 'e2e-email-password';
+process.env.FRONTEND_URL = 'http://localhost:3001';
