@@ -6,12 +6,19 @@ import { randomUUID } from 'node:crypto';
 import { AppException } from '../common/errors/app.exception';
 import { EmailService } from './mailler/email.service';
 import { PrismaService } from '../prisma/prisma.service';
-import { BCRYPT_ROUNDS, EMAIL_CONFIRMATION_TTL_MS } from './auth.constants';
+import {
+  BCRYPT_ROUNDS,
+  EMAIL_CONFIRMATION_TTL_MS,
+  PASSWORD_RECOVERY_TTL_MS,
+} from './auth.constants';
 import { AUTH_ERROR_CODE, AUTH_ERROR_MESSAGE } from './auth.error-code';
 import { LoginDto } from './dto/login.dto';
+import { NewPasswordDto } from './dto/new-password.dto';
+import { PasswordRecoveryDto } from './dto/password-recovery.dto';
 import { RegistrationConfirmationDto } from './dto/registration-confirmation.dto';
 import { RegistrationEmailResendingDto } from './dto/registration-email-resending.dto';
 import { RegistrationDto } from './dto/registration.dto';
+import { RecaptchaService } from './recaptcha/recaptcha.service';
 import type {
   AuthenticatedUser,
   JwtExpiresIn,
@@ -49,6 +56,7 @@ export class AuthService {
     private readonly jwtService: JwtService,
     private readonly configService: ConfigService,
     private readonly emailService: EmailService,
+    private readonly recaptchaService: RecaptchaService,
   ) {}
 
   /**
@@ -260,6 +268,98 @@ export class AuthService {
   }
 
   /**
+   * Запрос восстановления пароля: создаёт/обновляет recovery-код и шлёт письмо.
+   * Письмо уходит и неподтверждённым пользователям (isConfirmed не проверяем).
+   *
+   * @throws AppException `RECAPTCHA_FAILED` со статусом 400
+   * @throws AppException `USER_NOT_FOUND` со статусом 404
+   */
+  async passwordRecovery(dto: PasswordRecoveryDto): Promise<void> {
+    // Сначала captcha — иначе боты дёргали бы БД по произвольным email.
+    await this.recaptchaService.verify(dto.recaptchaToken);
+
+    const user = await this.prisma.user.findUnique({
+      where: { email: dto.email },
+    });
+
+    if (!user) {
+      throw new AppException({
+        code: AUTH_ERROR_CODE.USER_NOT_FOUND,
+        message: AUTH_ERROR_MESSAGE.USER_NOT_FOUND,
+        status: HttpStatus.NOT_FOUND,
+        details: [
+          { field: 'email', message: AUTH_ERROR_MESSAGE.USER_NOT_FOUND },
+        ],
+      });
+    }
+
+    const code = randomUUID();
+    const expiresAt = new Date(Date.now() + PASSWORD_RECOVERY_TTL_MS);
+
+    await this.prisma.passwordRecovery.upsert({
+      where: { userId: user.id },
+      create: { userId: user.id, code, expiresAt },
+      update: { code, expiresAt },
+    });
+
+    await this.sendPasswordRecoveryEmail(user.email, code);
+  }
+
+  /**
+   * Установка нового пароля по recovery-коду.
+   * После успеха удаляет recovery и все Session пользователя.
+   *
+   * @throws AppException `RECOVERY_CODE_INVALID`
+   * @throws AppException `RECOVERY_CODE_EXPIRED`
+   */
+  async newPassword(dto: NewPasswordDto): Promise<void> {
+    const recovery = await this.prisma.passwordRecovery.findUnique({
+      where: { code: dto.recoveryCode },
+    });
+
+    if (!recovery) {
+      throw new AppException({
+        code: AUTH_ERROR_CODE.RECOVERY_CODE_INVALID,
+        message: AUTH_ERROR_MESSAGE.RECOVERY_CODE_INVALID,
+        details: [
+          {
+            field: 'recoveryCode',
+            message: AUTH_ERROR_MESSAGE.RECOVERY_CODE_INVALID,
+          },
+        ],
+      });
+    }
+
+    if (recovery.expiresAt.getTime() < Date.now()) {
+      throw new AppException({
+        code: AUTH_ERROR_CODE.RECOVERY_CODE_EXPIRED,
+        message: AUTH_ERROR_MESSAGE.RECOVERY_CODE_EXPIRED,
+        details: [
+          {
+            field: 'recoveryCode',
+            message: AUTH_ERROR_MESSAGE.RECOVERY_CODE_EXPIRED,
+          },
+        ],
+      });
+    }
+
+    const passwordHash = await bcrypt.hash(dto.newPassword, BCRYPT_ROUNDS);
+
+    await this.prisma.$transaction([
+      this.prisma.user.update({
+        where: { id: recovery.userId },
+        data: { passwordHash },
+      }),
+      this.prisma.passwordRecovery.delete({
+        where: { id: recovery.id },
+      }),
+      this.prisma.session.deleteMany({
+        where: { userId: recovery.userId },
+      }),
+    ]);
+  }
+
+  /**
    * Пользователь для `request.user`. Возвращает `null`, если аккаунт удалён, —
    * тогда ещё живой токен не должен пускать дальше.
    */
@@ -298,5 +398,15 @@ export class AuthService {
     const confirmUrl = `${frontendUrl}/auth/registration-confirmation?code=${code}`;
 
     await this.emailService.sendRegistrationConfirmation(email, confirmUrl);
+  }
+
+  private async sendPasswordRecoveryEmail(
+    email: string,
+    code: string,
+  ): Promise<void> {
+    const frontendUrl = this.configService.getOrThrow<string>('FRONTEND_URL');
+    const recoveryUrl = `${frontendUrl}/auth/new-password?code=${code}`;
+
+    await this.emailService.sendPasswordRecovery(email, recoveryUrl);
   }
 }

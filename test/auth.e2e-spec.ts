@@ -507,3 +507,205 @@ describe('Регистрация (e2e)', () => {
     });
   });
 });
+
+describe('Восстановление пароля (e2e)', () => {
+  let app: INestApplication<App>;
+  let findUnique: jest.Mock;
+  let passwordRecoveryFindUnique: jest.Mock;
+  let passwordRecoveryUpsert: jest.Mock;
+  let passwordRecoveryDelete: jest.Mock;
+  let sessionDeleteMany: jest.Mock;
+  let userUpdate: jest.Mock;
+  let transaction: jest.Mock;
+  let sendPasswordRecovery: jest.Mock;
+
+  const RECOVERY_CODE = '0f8fad5b-d9cb-469f-a165-70867728950e';
+  const RECAPTCHA_TOKEN = 'e2e-recaptcha-token';
+  const NEW_PASSWORD_BODY = {
+    newPassword: PASSWORD,
+    passwordConfirmation: PASSWORD,
+    recoveryCode: RECOVERY_CODE,
+  };
+  const PASSWORD_RECOVERY_BODY = {
+    email: USER.email,
+    recaptchaToken: RECAPTCHA_TOKEN,
+  };
+
+  beforeAll(async () => {
+    findUnique = jest.fn().mockResolvedValue(null);
+    passwordRecoveryFindUnique = jest.fn();
+    passwordRecoveryUpsert = jest.fn().mockResolvedValue(undefined);
+    passwordRecoveryDelete = jest.fn().mockResolvedValue(undefined);
+    sessionDeleteMany = jest.fn().mockResolvedValue({ count: 0 });
+    userUpdate = jest.fn().mockResolvedValue(undefined);
+    transaction = jest.fn(async (ops: Promise<unknown>[]) => Promise.all(ops));
+    sendPasswordRecovery = jest.fn().mockResolvedValue(undefined);
+
+    const moduleFixture = await Test.createTestingModule({
+      imports: [AppModule],
+    })
+      .overrideProvider(PrismaService)
+      .useValue({
+        user: {
+          findUnique,
+          update: userUpdate,
+        },
+        passwordRecovery: {
+          findUnique: passwordRecoveryFindUnique,
+          upsert: passwordRecoveryUpsert,
+          delete: passwordRecoveryDelete,
+        },
+        session: {
+          deleteMany: sessionDeleteMany,
+        },
+        $transaction: transaction,
+      })
+      .overrideProvider(EmailService)
+      .useValue({ sendPasswordRecovery })
+      .compile();
+
+    app = moduleFixture.createNestApplication();
+    setupApp(app);
+    await app.init();
+  });
+
+  afterAll(async () => {
+    await app.close();
+  });
+
+  beforeEach(() => {
+    findUnique.mockReset().mockResolvedValue(null);
+    passwordRecoveryFindUnique.mockReset();
+    passwordRecoveryUpsert.mockClear();
+    passwordRecoveryDelete.mockClear();
+    sessionDeleteMany.mockClear();
+    userUpdate.mockClear();
+    transaction
+      .mockClear()
+      .mockImplementation(async (ops: Promise<unknown>[]) => Promise.all(ops));
+    sendPasswordRecovery.mockClear().mockResolvedValue(undefined);
+  });
+
+  describe('POST /api/auth/password-recovery', () => {
+    it('отвечает 204 и шлёт письмо существующему пользователю', async () => {
+      // Arrange
+      findUnique.mockResolvedValue({
+        id: USER.id,
+        email: USER.email,
+        isConfirmed: false,
+      });
+
+      // Act
+      const response = await request(app.getHttpServer())
+        .post('/api/auth/password-recovery')
+        .send(PASSWORD_RECOVERY_BODY)
+        .expect(HttpStatus.NO_CONTENT);
+
+      // Assert
+      expect(response.body).toEqual({});
+      expect(passwordRecoveryUpsert).toHaveBeenCalledTimes(1);
+      expect(sendPasswordRecovery).toHaveBeenCalledTimes(1);
+    });
+
+    it('отвечает 404 с USER_NOT_FOUND на неизвестный email', async () => {
+      // Arrange
+      findUnique.mockResolvedValue(null);
+
+      // Act
+      const response = await request(app.getHttpServer())
+        .post('/api/auth/password-recovery')
+        .send({
+          email: 'nobody@example.com',
+          recaptchaToken: RECAPTCHA_TOKEN,
+        })
+        .expect(HttpStatus.NOT_FOUND);
+
+      // Assert
+      expect((response.body as ApiErrorDto).code).toBe(
+        AUTH_ERROR_CODE.USER_NOT_FOUND,
+      );
+      expect(passwordRecoveryUpsert).not.toHaveBeenCalled();
+    });
+
+    it('отвечает 400 с VALIDATION_ERROR на невалидный email', async () => {
+      // Arrange
+      // Act
+      const response = await request(app.getHttpServer())
+        .post('/api/auth/password-recovery')
+        .send({ email: 'not-an-email', recaptchaToken: RECAPTCHA_TOKEN })
+        .expect(HttpStatus.BAD_REQUEST);
+
+      // Assert
+      expect((response.body as ApiErrorDto).code).toBe(
+        ERROR_CODE.VALIDATION_ERROR,
+      );
+    });
+  });
+
+  describe('POST /api/auth/new-password', () => {
+    it('отвечает 204, обновляет пароль и сбрасывает сессии', async () => {
+      // Arrange
+      passwordRecoveryFindUnique.mockResolvedValue({
+        id: 'recovery-id',
+        userId: USER.id,
+        code: RECOVERY_CODE,
+        expiresAt: new Date(Date.now() + 60_000),
+      });
+
+      // Act
+      await request(app.getHttpServer())
+        .post('/api/auth/new-password')
+        .send(NEW_PASSWORD_BODY)
+        .expect(HttpStatus.NO_CONTENT);
+
+      // Assert
+      expect(userUpdate).toHaveBeenCalledWith({
+        where: { id: USER.id },
+        data: { passwordHash: expect.stringMatching(/^\$2[aby]\$/) },
+      });
+      expect(passwordRecoveryDelete).toHaveBeenCalledWith({
+        where: { id: 'recovery-id' },
+      });
+      expect(sessionDeleteMany).toHaveBeenCalledWith({
+        where: { userId: USER.id },
+      });
+    });
+
+    it('отвечает 400 с RECOVERY_CODE_INVALID на неизвестный код', async () => {
+      // Arrange
+      passwordRecoveryFindUnique.mockResolvedValue(null);
+
+      // Act
+      const response = await request(app.getHttpServer())
+        .post('/api/auth/new-password')
+        .send(NEW_PASSWORD_BODY)
+        .expect(HttpStatus.BAD_REQUEST);
+
+      // Assert
+      expect((response.body as ApiErrorDto).code).toBe(
+        AUTH_ERROR_CODE.RECOVERY_CODE_INVALID,
+      );
+    });
+
+    it('отвечает 400 с RECOVERY_CODE_EXPIRED на просроченный код', async () => {
+      // Arrange
+      passwordRecoveryFindUnique.mockResolvedValue({
+        id: 'recovery-id',
+        userId: USER.id,
+        code: RECOVERY_CODE,
+        expiresAt: new Date(Date.now() - 1_000),
+      });
+
+      // Act
+      const response = await request(app.getHttpServer())
+        .post('/api/auth/new-password')
+        .send(NEW_PASSWORD_BODY)
+        .expect(HttpStatus.BAD_REQUEST);
+
+      // Assert
+      expect((response.body as ApiErrorDto).code).toBe(
+        AUTH_ERROR_CODE.RECOVERY_CODE_EXPIRED,
+      );
+    });
+  });
+});

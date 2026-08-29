@@ -23,6 +23,8 @@ import { AuthService } from './auth.service';
 import { CurrentUser } from './decorators/current-user.decorator';
 import { LoginResponseDto } from './dto/login-response.dto';
 import { LoginDto } from './dto/login.dto';
+import { NewPasswordDto } from './dto/new-password.dto';
+import { PasswordRecoveryDto } from './dto/password-recovery.dto';
 import { RegistrationConfirmationDto } from './dto/registration-confirmation.dto';
 import { RegistrationEmailResendingDto } from './dto/registration-email-resending.dto';
 import { RegistrationDto } from './dto/registration.dto';
@@ -80,6 +82,36 @@ export class AuthController {
     @Body() dto: RegistrationEmailResendingDto,
   ): Promise<void> {
     await this.authService.registrationEmailResending(dto);
+  }
+
+  @Post('password-recovery')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({
+    summary: 'Восстановление пароля',
+    description: 'Отправляет письмо со ссылкой для смены пароля.',
+  })
+  @ApiResponse({
+    status: HttpStatus.NO_CONTENT,
+    description: 'Письмо отправлено',
+  })
+  @ApiErrorResponses(HttpStatus.BAD_REQUEST, HttpStatus.NOT_FOUND)
+  async passwordRecovery(@Body() dto: PasswordRecoveryDto): Promise<void> {
+    await this.authService.passwordRecovery(dto);
+  }
+
+  @Post('new-password')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({
+    summary: 'Новый пароль по recovery-коду',
+    description: 'Меняет пароль и инвалидирует все сессии пользователя.',
+  })
+  @ApiResponse({
+    status: HttpStatus.NO_CONTENT,
+    description: 'Пароль обновлён',
+  })
+  @ApiErrorResponses(HttpStatus.BAD_REQUEST)
+  async newPassword(@Body() dto: NewPasswordDto): Promise<void> {
+    await this.authService.newPassword(dto);
   }
 
   @Post('login')

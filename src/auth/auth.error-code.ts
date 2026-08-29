@@ -30,6 +30,10 @@ export const AUTH_ERROR_CODE = {
   CONFIRMATION_CODE_EXPIRED: 'CONFIRMATION_CODE_EXPIRED',
   USER_NOT_FOUND: 'USER_NOT_FOUND',
   EMAIL_ALREADY_CONFIRMED: 'EMAIL_ALREADY_CONFIRMED',
+
+  RECOVERY_CODE_INVALID: 'RECOVERY_CODE_INVALID',
+  RECOVERY_CODE_EXPIRED: 'RECOVERY_CODE_EXPIRED',
+  RECAPTCHA_FAILED: 'RECAPTCHA_FAILED',
 } as const;
 
 export type AuthErrorCode =
@@ -46,4 +50,7 @@ export const AUTH_ERROR_MESSAGE = {
   CONFIRMATION_CODE_EXPIRED: 'Ссылка подтверждения истекла',
   USER_NOT_FOUND: 'Пользователь не найден',
   EMAIL_ALREADY_CONFIRMED: 'Email уже подтверждён',
+  RECOVERY_CODE_INVALID: 'Код восстановления недействителен',
+  RECOVERY_CODE_EXPIRED: 'Ссылка восстановления истекла',
+  RECAPTCHA_FAILED: 'Проверка reCAPTCHA не пройдена',
 } as const;

@@ -45,10 +45,16 @@ describe('AuthService', () => {
   let emailConfirmationFindUnique: jest.Mock;
   let emailConfirmationDelete: jest.Mock;
   let emailConfirmationUpsert: jest.Mock;
+  let passwordRecoveryFindUnique: jest.Mock;
+  let passwordRecoveryUpsert: jest.Mock;
+  let passwordRecoveryDelete: jest.Mock;
+  let sessionDeleteMany: jest.Mock;
   let userUpdate: jest.Mock;
   let transaction: jest.Mock;
   let signAsync: jest.Mock;
   let sendRegistrationConfirmation: jest.Mock;
+  let sendPasswordRecovery: jest.Mock;
+  let verifyRecaptcha: jest.Mock;
   let passwordHash: string;
 
   beforeAll(async () => {
@@ -66,10 +72,16 @@ describe('AuthService', () => {
     emailConfirmationFindUnique = jest.fn();
     emailConfirmationDelete = jest.fn().mockResolvedValue(undefined);
     emailConfirmationUpsert = jest.fn().mockResolvedValue(undefined);
+    passwordRecoveryFindUnique = jest.fn();
+    passwordRecoveryUpsert = jest.fn().mockResolvedValue(undefined);
+    passwordRecoveryDelete = jest.fn().mockResolvedValue(undefined);
+    sessionDeleteMany = jest.fn().mockResolvedValue({ count: 0 });
     userUpdate = jest.fn().mockResolvedValue(undefined);
     transaction = jest.fn(async (ops: Promise<unknown>[]) => Promise.all(ops));
     signAsync = jest.fn().mockResolvedValue('signed-token');
     sendRegistrationConfirmation = jest.fn().mockResolvedValue(undefined);
+    sendPasswordRecovery = jest.fn().mockResolvedValue(undefined);
+    verifyRecaptcha = jest.fn().mockResolvedValue(undefined);
 
     service = new AuthService(
       {
@@ -84,6 +96,14 @@ describe('AuthService', () => {
           delete: emailConfirmationDelete,
           upsert: emailConfirmationUpsert,
         },
+        passwordRecovery: {
+          findUnique: passwordRecoveryFindUnique,
+          upsert: passwordRecoveryUpsert,
+          delete: passwordRecoveryDelete,
+        },
+        session: {
+          deleteMany: sessionDeleteMany,
+        },
         $transaction: transaction,
       } as unknown as PrismaService,
       { signAsync } as unknown as JwtService,
@@ -92,7 +112,9 @@ describe('AuthService', () => {
       } as unknown as ConfigService,
       {
         sendRegistrationConfirmation,
+        sendPasswordRecovery,
       } as never,
+      { verify: verifyRecaptcha } as never,
     );
   });
 
@@ -506,6 +528,156 @@ describe('AuthService', () => {
       // Assert
       expect(error.code).toBe(AUTH_ERROR_CODE.EMAIL_ALREADY_CONFIRMED);
       expect(sendRegistrationConfirmation).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('passwordRecovery', () => {
+    const RECAPTCHA_TOKEN = 'test-recaptcha-token';
+
+    it('upsert recovery-кода и шлёт письмо (в т.ч. неподтверждённому)', async () => {
+      // Arrange
+      findUnique.mockResolvedValue({
+        id: USER_ID,
+        email: EMAIL,
+        isConfirmed: false,
+      });
+
+      // Act
+      await service.passwordRecovery({
+        email: EMAIL,
+        recaptchaToken: RECAPTCHA_TOKEN,
+      });
+
+      // Assert
+      expect(verifyRecaptcha).toHaveBeenCalledWith(RECAPTCHA_TOKEN);
+      expect(passwordRecoveryUpsert).toHaveBeenCalledWith({
+        where: { userId: USER_ID },
+        create: expect.objectContaining({
+          userId: USER_ID,
+          code: expect.any(String),
+          expiresAt: expect.any(Date),
+        }),
+        update: expect.objectContaining({
+          code: expect.any(String),
+          expiresAt: expect.any(Date),
+        }),
+      });
+      expect(sendPasswordRecovery).toHaveBeenCalledWith(
+        EMAIL,
+        expect.stringMatching(
+          /^value-of-FRONTEND_URL\/auth\/new-password\?code=[0-9a-f-]{36}$/,
+        ),
+      );
+    });
+
+    it('кидает USER_NOT_FOUND со статусом 404, если email неизвестен', async () => {
+      // Arrange
+      findUnique.mockResolvedValue(null);
+
+      // Act
+      const error = await captureError(
+        service.passwordRecovery({
+          email: 'nobody@example.com',
+          recaptchaToken: RECAPTCHA_TOKEN,
+        }),
+      );
+
+      // Assert
+      expect(verifyRecaptcha).toHaveBeenCalledWith(RECAPTCHA_TOKEN);
+      expect(error.code).toBe(AUTH_ERROR_CODE.USER_NOT_FOUND);
+      expect(error.getStatus()).toBe(HttpStatus.NOT_FOUND);
+      expect(passwordRecoveryUpsert).not.toHaveBeenCalled();
+      expect(sendPasswordRecovery).not.toHaveBeenCalled();
+    });
+
+    it('не ходит в БД, если reCAPTCHA не прошла', async () => {
+      // Arrange
+      verifyRecaptcha.mockRejectedValue(
+        new AppException({
+          code: AUTH_ERROR_CODE.RECAPTCHA_FAILED,
+          message: AUTH_ERROR_MESSAGE.RECAPTCHA_FAILED,
+          status: HttpStatus.BAD_REQUEST,
+        }),
+      );
+
+      // Act
+      const error = await captureError(
+        service.passwordRecovery({
+          email: EMAIL,
+          recaptchaToken: RECAPTCHA_TOKEN,
+        }),
+      );
+
+      // Assert
+      expect(error.code).toBe(AUTH_ERROR_CODE.RECAPTCHA_FAILED);
+      expect(findUnique).not.toHaveBeenCalled();
+      expect(passwordRecoveryUpsert).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('newPassword', () => {
+    const RECOVERY_CODE = '0f8fad5b-d9cb-469f-a165-70867728950e';
+    const newPasswordDto = {
+      newPassword: VALID_PASSWORD,
+      passwordConfirmation: VALID_PASSWORD,
+      recoveryCode: RECOVERY_CODE,
+    };
+
+    it('обновляет пароль, удаляет recovery и все Session', async () => {
+      // Arrange
+      passwordRecoveryFindUnique.mockResolvedValue({
+        id: 'recovery-id',
+        userId: USER_ID,
+        code: RECOVERY_CODE,
+        expiresAt: new Date(Date.now() + 60_000),
+      });
+
+      // Act
+      await service.newPassword(newPasswordDto);
+
+      // Assert
+      expect(transaction).toHaveBeenCalledTimes(1);
+      expect(userUpdate).toHaveBeenCalledWith({
+        where: { id: USER_ID },
+        data: { passwordHash: expect.stringMatching(/^\$2[aby]\$/) },
+      });
+      expect(passwordRecoveryDelete).toHaveBeenCalledWith({
+        where: { id: 'recovery-id' },
+      });
+      expect(sessionDeleteMany).toHaveBeenCalledWith({
+        where: { userId: USER_ID },
+      });
+    });
+
+    it('кидает RECOVERY_CODE_INVALID, если кода нет', async () => {
+      // Arrange
+      passwordRecoveryFindUnique.mockResolvedValue(null);
+
+      // Act
+      const error = await captureError(service.newPassword(newPasswordDto));
+
+      // Assert
+      expect(error.code).toBe(AUTH_ERROR_CODE.RECOVERY_CODE_INVALID);
+      expect(error.message).toBe(AUTH_ERROR_MESSAGE.RECOVERY_CODE_INVALID);
+      expect(transaction).not.toHaveBeenCalled();
+    });
+
+    it('кидает RECOVERY_CODE_EXPIRED, если TTL вышел', async () => {
+      // Arrange
+      passwordRecoveryFindUnique.mockResolvedValue({
+        id: 'recovery-id',
+        userId: USER_ID,
+        code: RECOVERY_CODE,
+        expiresAt: new Date(Date.now() - 1_000),
+      });
+
+      // Act
+      const error = await captureError(service.newPassword(newPasswordDto));
+
+      // Assert
+      expect(error.code).toBe(AUTH_ERROR_CODE.RECOVERY_CODE_EXPIRED);
+      expect(error.getStatus()).toBe(HttpStatus.BAD_REQUEST);
+      expect(transaction).not.toHaveBeenCalled();
     });
   });
 });

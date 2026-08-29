@@ -46,4 +46,29 @@ export class EmailService {
       });
     }
   }
+
+  async sendPasswordRecovery(
+    email: string,
+    recoveryUrl: string,
+  ): Promise<void> {
+    try {
+      await this.transporter.sendMail({
+        from: this.from,
+        to: email,
+        subject: 'Spark — восстановление пароля',
+        text: `Чтобы задать новый пароль, перейдите по ссылке: ${recoveryUrl}`,
+        html: `<p>Чтобы задать новый пароль, перейдите по ссылке:</p><p><a href="${recoveryUrl}">${recoveryUrl}</a></p>`,
+      });
+
+      this.logger.log(`Password recovery email sent to ${email}`);
+    } catch (error) {
+      this.logger.error(
+        `Email send failed: ${error instanceof Error ? error.message : 'unknown error'}`,
+      );
+      throw new AppException({
+        code: ERROR_CODE.BAD_REQUEST,
+        message: 'Не удалось отправить письмо',
+      });
+    }
+  }
 }

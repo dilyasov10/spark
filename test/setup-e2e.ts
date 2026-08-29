@@ -24,3 +24,6 @@ process.env.JWT_REFRESH_EXPIRES_IN = '7d';
 process.env.EMAIL_USER = 'e2e@example.com';
 process.env.EMAIL_PASS = 'e2e-email-password';
 process.env.FRONTEND_URL = 'http://localhost:3001';
+
+// reCAPTCHA в e2e не ходим в Google — RecaptchaService при false сразу return.
+process.env.RECAPTCHA_ENABLED = 'false';
