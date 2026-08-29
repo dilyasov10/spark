@@ -9,6 +9,7 @@ import { AUTH_ERROR_CODE } from '../src/auth/auth.error-code';
 import { setupApp } from '../src/common/bootstrap/setup-app';
 import { ApiErrorDto } from '../src/common/dto/api-error.dto';
 import { ERROR_CODE } from '../src/common/errors/error-code';
+import { EmailService } from '../src/auth/mailler/email.service';
 import { PrismaService } from '../src/prisma/prisma.service';
 
 // Секреты общие для всех e2e-спек и выставляются в test/setup-e2e.ts.
@@ -237,6 +238,272 @@ describe('Авторизация (e2e)', () => {
 
       // Assert
       expect((response.body as ApiErrorDto).code).toBe(ERROR_CODE.UNAUTHORIZED);
+    });
+  });
+});
+
+describe('Регистрация (e2e)', () => {
+  let app: INestApplication<App>;
+  let findUnique: jest.Mock;
+  let userDelete: jest.Mock;
+  let userCreate: jest.Mock;
+  let emailConfirmationFindUnique: jest.Mock;
+  let emailConfirmationDelete: jest.Mock;
+  let emailConfirmationUpsert: jest.Mock;
+  let userUpdate: jest.Mock;
+  let transaction: jest.Mock;
+  let sendRegistrationConfirmation: jest.Mock;
+
+  const VALID_BODY = {
+    username: 'test_user',
+    email: 'new.user@example.com',
+    password: PASSWORD,
+    passwordConfirmation: PASSWORD,
+    firstName: 'Тест',
+    lastName: 'Юзер',
+  };
+
+  const CONFIRMATION_CODE = '0f8fad5b-d9cb-469f-a165-70867728950e';
+
+  beforeAll(async () => {
+    findUnique = jest.fn().mockResolvedValue(null);
+    userDelete = jest.fn().mockResolvedValue(undefined);
+    userCreate = jest.fn().mockResolvedValue({
+      id: USER.id,
+      email: VALID_BODY.email,
+    });
+    emailConfirmationFindUnique = jest.fn();
+    emailConfirmationDelete = jest.fn().mockResolvedValue(undefined);
+    emailConfirmationUpsert = jest.fn().mockResolvedValue(undefined);
+    userUpdate = jest.fn().mockResolvedValue(undefined);
+    transaction = jest.fn(async (ops: Promise<unknown>[]) => Promise.all(ops));
+    sendRegistrationConfirmation = jest.fn().mockResolvedValue(undefined);
+
+    const moduleFixture = await Test.createTestingModule({
+      imports: [AppModule],
+    })
+      .overrideProvider(PrismaService)
+      .useValue({
+        user: {
+          findUnique,
+          delete: userDelete,
+          create: userCreate,
+          update: userUpdate,
+        },
+        emailConfirmation: {
+          findUnique: emailConfirmationFindUnique,
+          delete: emailConfirmationDelete,
+          upsert: emailConfirmationUpsert,
+        },
+        $transaction: transaction,
+      })
+      .overrideProvider(EmailService)
+      .useValue({ sendRegistrationConfirmation })
+      .compile();
+
+    app = moduleFixture.createNestApplication();
+    setupApp(app);
+    await app.init();
+  });
+
+  afterAll(async () => {
+    await app.close();
+  });
+
+  beforeEach(() => {
+    findUnique.mockReset().mockResolvedValue(null);
+    userDelete.mockClear();
+    userCreate.mockClear().mockResolvedValue({
+      id: USER.id,
+      email: VALID_BODY.email,
+    });
+    emailConfirmationFindUnique.mockReset();
+    emailConfirmationDelete.mockClear();
+    emailConfirmationUpsert.mockClear();
+    userUpdate.mockClear();
+    transaction
+      .mockClear()
+      .mockImplementation(async (ops: Promise<unknown>[]) => Promise.all(ops));
+    sendRegistrationConfirmation.mockClear().mockResolvedValue(undefined);
+  });
+
+  describe('POST /api/auth/registration', () => {
+    it('отвечает 204 и создаёт пользователя без тела ответа', async () => {
+      // Arrange
+      // Act
+      const response = await request(app.getHttpServer())
+        .post('/api/auth/registration')
+        .send(VALID_BODY)
+        .expect(HttpStatus.NO_CONTENT);
+
+      // Assert
+      expect(response.body).toEqual({});
+      expect(userCreate).toHaveBeenCalledTimes(1);
+      expect(sendRegistrationConfirmation).toHaveBeenCalledTimes(1);
+    });
+
+    it('отвечает 400 с EMAIL_ALREADY_EXISTS на подтверждённый email', async () => {
+      // Arrange
+      findUnique
+        .mockResolvedValueOnce({
+          id: USER.id,
+          email: VALID_BODY.email,
+          isConfirmed: true,
+        })
+        .mockResolvedValueOnce(null);
+
+      // Act
+      const response = await request(app.getHttpServer())
+        .post('/api/auth/registration')
+        .send(VALID_BODY)
+        .expect(HttpStatus.BAD_REQUEST);
+
+      // Assert
+      const body = response.body as ApiErrorDto;
+      expect(body.code).toBe(AUTH_ERROR_CODE.EMAIL_ALREADY_EXISTS);
+      expect(body).not.toHaveProperty('statusCode');
+      expect(userCreate).not.toHaveBeenCalled();
+    });
+
+    it('отвечает 400 с деталями по полям на невалидное тело', async () => {
+      // Arrange
+      // Act
+      const response = await request(app.getHttpServer())
+        .post('/api/auth/registration')
+        .send({
+          username: 'ab',
+          email: 'not-an-email',
+          password: 'short',
+          passwordConfirmation: 'other',
+          firstName: '',
+          lastName: '',
+        })
+        .expect(HttpStatus.BAD_REQUEST);
+
+      // Assert
+      const body = response.body as ApiErrorDto;
+      expect(body.code).toBe(ERROR_CODE.VALIDATION_ERROR);
+      expect(body.details?.map((detail) => detail.field)).toEqual(
+        expect.arrayContaining(['username', 'email', 'password']),
+      );
+    });
+  });
+
+  describe('POST /api/auth/registration-confirmation', () => {
+    it('отвечает 204 при валидном коде', async () => {
+      // Arrange
+      emailConfirmationFindUnique.mockResolvedValue({
+        id: 'confirmation-id',
+        userId: USER.id,
+        code: CONFIRMATION_CODE,
+        expiresAt: new Date(Date.now() + 60_000),
+      });
+
+      // Act
+      await request(app.getHttpServer())
+        .post('/api/auth/registration-confirmation')
+        .send({ code: CONFIRMATION_CODE })
+        .expect(HttpStatus.NO_CONTENT);
+
+      // Assert
+      expect(userUpdate).toHaveBeenCalledWith({
+        where: { id: USER.id },
+        data: { isConfirmed: true },
+      });
+    });
+
+    it('отвечает 400 с CONFIRMATION_CODE_INVALID на неизвестный код', async () => {
+      // Arrange
+      emailConfirmationFindUnique.mockResolvedValue(null);
+
+      // Act
+      const response = await request(app.getHttpServer())
+        .post('/api/auth/registration-confirmation')
+        .send({ code: CONFIRMATION_CODE })
+        .expect(HttpStatus.BAD_REQUEST);
+
+      // Assert
+      expect((response.body as ApiErrorDto).code).toBe(
+        AUTH_ERROR_CODE.CONFIRMATION_CODE_INVALID,
+      );
+    });
+
+    it('отвечает 400 с CONFIRMATION_CODE_EXPIRED на просроченный код', async () => {
+      // Arrange
+      emailConfirmationFindUnique.mockResolvedValue({
+        id: 'confirmation-id',
+        userId: USER.id,
+        code: CONFIRMATION_CODE,
+        expiresAt: new Date(Date.now() - 1_000),
+      });
+
+      // Act
+      const response = await request(app.getHttpServer())
+        .post('/api/auth/registration-confirmation')
+        .send({ code: CONFIRMATION_CODE })
+        .expect(HttpStatus.BAD_REQUEST);
+
+      // Assert
+      expect((response.body as ApiErrorDto).code).toBe(
+        AUTH_ERROR_CODE.CONFIRMATION_CODE_EXPIRED,
+      );
+    });
+  });
+
+  describe('POST /api/auth/registration-email-resending', () => {
+    it('отвечает 204 и шлёт письмо неподтверждённому пользователю', async () => {
+      // Arrange
+      findUnique.mockResolvedValue({
+        id: USER.id,
+        email: VALID_BODY.email,
+        isConfirmed: false,
+      });
+
+      // Act
+      await request(app.getHttpServer())
+        .post('/api/auth/registration-email-resending')
+        .send({ email: VALID_BODY.email })
+        .expect(HttpStatus.NO_CONTENT);
+
+      // Assert
+      expect(emailConfirmationUpsert).toHaveBeenCalledTimes(1);
+      expect(sendRegistrationConfirmation).toHaveBeenCalledTimes(1);
+    });
+
+    it('отвечает 404 с USER_NOT_FOUND на неизвестный email', async () => {
+      // Arrange
+      findUnique.mockResolvedValue(null);
+
+      // Act
+      const response = await request(app.getHttpServer())
+        .post('/api/auth/registration-email-resending')
+        .send({ email: 'nobody@example.com' })
+        .expect(HttpStatus.NOT_FOUND);
+
+      // Assert
+      expect((response.body as ApiErrorDto).code).toBe(
+        AUTH_ERROR_CODE.USER_NOT_FOUND,
+      );
+    });
+
+    it('отвечает 400 с EMAIL_ALREADY_CONFIRMED на уже подтверждённый email', async () => {
+      // Arrange
+      findUnique.mockResolvedValue({
+        id: USER.id,
+        email: VALID_BODY.email,
+        isConfirmed: true,
+      });
+
+      // Act
+      const response = await request(app.getHttpServer())
+        .post('/api/auth/registration-email-resending')
+        .send({ email: VALID_BODY.email })
+        .expect(HttpStatus.BAD_REQUEST);
+
+      // Assert
+      expect((response.body as ApiErrorDto).code).toBe(
+        AUTH_ERROR_CODE.EMAIL_ALREADY_CONFIRMED,
+      );
     });
   });
 });

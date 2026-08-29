@@ -15,6 +15,6 @@ export class MatchPasswordConfirmationConstraint implements ValidatorConstraintI
   }
 
   defaultMessage(): string {
-    return 'Passwords do not match';
+    return 'Пароли не совпадают';
   }
 }

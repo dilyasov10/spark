@@ -1,8 +1,11 @@
 import { HttpStatus } from '@nestjs/common';
 
 /**
- * Машинные коды ошибок — часть публичного контракта.
- * Все коды API в одном месте (как status codes в HW01), чтобы не размазывать по модулям.
+ * Машинные коды ошибок — часть публичного контракта (CLAUDE.md, правило 5).
+ * Фронтенд ветвится по `code`, поэтому переименование ломает клиент так же,
+ * как переименование поля: сначала предупреждаем, потом мержим.
+ *
+ * Здесь лежат только общие коды. Доменные auth-коды — в `auth/auth.error-code.ts`.
  */
 export const ERROR_CODE = {
   VALIDATION_ERROR: 'VALIDATION_ERROR',
@@ -11,14 +14,6 @@ export const ERROR_CODE = {
   FORBIDDEN: 'FORBIDDEN',
   NOT_FOUND: 'NOT_FOUND',
   INTERNAL_SERVER_ERROR: 'INTERNAL_SERVER_ERROR',
-
-  // Auth
-  EMAIL_ALREADY_EXISTS: 'EMAIL_ALREADY_EXISTS',
-  USERNAME_ALREADY_EXISTS: 'USERNAME_ALREADY_EXISTS',
-  CONFIRMATION_CODE_INVALID: 'CONFIRMATION_CODE_INVALID',
-  CONFIRMATION_CODE_EXPIRED: 'CONFIRMATION_CODE_EXPIRED',
-  USER_NOT_FOUND: 'USER_NOT_FOUND',
-  EMAIL_ALREADY_CONFIRMED: 'EMAIL_ALREADY_CONFIRMED',
 } as const;
 
 export type ErrorCode = (typeof ERROR_CODE)[keyof typeof ERROR_CODE];

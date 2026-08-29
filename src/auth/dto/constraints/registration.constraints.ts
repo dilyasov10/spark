@@ -12,8 +12,3 @@ export const FIRST_NAME_MIN_LENGTH = 1;
 export const FIRST_NAME_MAX_LENGTH = 50;
 export const LAST_NAME_MIN_LENGTH = 1;
 export const LAST_NAME_MAX_LENGTH = 50;
-
-/** TTL for email confirmation code (plan: 1 hour). */
-export const EMAIL_CONFIRMATION_TTL_MS = 60 * 60 * 1000;
-
-export const BCRYPT_SALT_ROUNDS = 10;

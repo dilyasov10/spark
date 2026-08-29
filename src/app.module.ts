@@ -6,18 +6,10 @@ import { AppService } from './app.service';
 import { AuthModule } from './auth/auth.module';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
 import { createValidationPipe } from './common/validation/validation-pipe.factory';
-// Регистрация живёт в отдельном модуле от JWT-логина, но класс там тоже
-// назван AuthModule — разводим псевдонимом, пока модули не объединены.
-import { AuthModule as RegistrationModule } from './modules/auth/auth.module';
 import { PrismaModule } from './prisma/prisma.module';
 
 @Module({
-  imports: [
-    ConfigModule.forRoot({ isGlobal: true }),
-    PrismaModule,
-    AuthModule,
-    RegistrationModule,
-  ],
+  imports: [ConfigModule.forRoot({ isGlobal: true }), PrismaModule, AuthModule],
   controllers: [AppController],
   providers: [
     AppService,

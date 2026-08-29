@@ -40,7 +40,15 @@ async function captureError(promise: Promise<unknown>): Promise<AppException> {
 describe('AuthService', () => {
   let service: AuthService;
   let findUnique: jest.Mock;
+  let userDelete: jest.Mock;
+  let userCreate: jest.Mock;
+  let emailConfirmationFindUnique: jest.Mock;
+  let emailConfirmationDelete: jest.Mock;
+  let emailConfirmationUpsert: jest.Mock;
+  let userUpdate: jest.Mock;
+  let transaction: jest.Mock;
   let signAsync: jest.Mock;
+  let sendRegistrationConfirmation: jest.Mock;
   let passwordHash: string;
 
   beforeAll(async () => {
@@ -50,14 +58,41 @@ describe('AuthService', () => {
   beforeEach(() => {
     jest.mocked(bcrypt.compare).mockClear();
     findUnique = jest.fn();
+    userDelete = jest.fn().mockResolvedValue(undefined);
+    userCreate = jest.fn().mockResolvedValue({
+      id: USER_ID,
+      email: EMAIL,
+    });
+    emailConfirmationFindUnique = jest.fn();
+    emailConfirmationDelete = jest.fn().mockResolvedValue(undefined);
+    emailConfirmationUpsert = jest.fn().mockResolvedValue(undefined);
+    userUpdate = jest.fn().mockResolvedValue(undefined);
+    transaction = jest.fn(async (ops: Promise<unknown>[]) => Promise.all(ops));
     signAsync = jest.fn().mockResolvedValue('signed-token');
+    sendRegistrationConfirmation = jest.fn().mockResolvedValue(undefined);
 
     service = new AuthService(
-      { user: { findUnique } } as unknown as PrismaService,
+      {
+        user: {
+          findUnique,
+          delete: userDelete,
+          create: userCreate,
+          update: userUpdate,
+        },
+        emailConfirmation: {
+          findUnique: emailConfirmationFindUnique,
+          delete: emailConfirmationDelete,
+          upsert: emailConfirmationUpsert,
+        },
+        $transaction: transaction,
+      } as unknown as PrismaService,
       { signAsync } as unknown as JwtService,
       {
         getOrThrow: jest.fn((key: string) => `value-of-${key}`),
       } as unknown as ConfigService,
+      {
+        sendRegistrationConfirmation,
+      } as never,
     );
   });
 
@@ -73,6 +108,14 @@ describe('AuthService', () => {
     isConfirmed: true,
   });
 
+  const registrationDto = {
+    username: 'test_user',
+    email: 'new.user@example.com',
+    password: VALID_PASSWORD,
+    passwordConfirmation: VALID_PASSWORD,
+    firstName: 'Тест',
+    lastName: 'Юзер',
+  };
   it('возвращает пару токенов при верных учётных данных', async () => {
     // Arrange
     findUnique.mockResolvedValue(confirmedUser());
@@ -247,5 +290,222 @@ describe('AuthService', () => {
 
     // Assert
     expect(user).toBeNull();
+  });
+
+  describe('registration', () => {
+    it('создаёт пользователя с isConfirmed=false и вызывает mailer', async () => {
+      // Arrange
+      findUnique.mockResolvedValue(null);
+      userCreate.mockResolvedValue({
+        id: USER_ID,
+        email: registrationDto.email,
+      });
+
+      // Act
+      await service.registration(registrationDto);
+
+      // Assert
+      const [[createArgs]] = userCreate.mock.calls as [
+        [{ data: { isConfirmed: boolean; passwordHash: string } }],
+      ];
+      expect(createArgs.data.isConfirmed).toBe(false);
+      expect(createArgs.data.passwordHash).toMatch(/^\$2[aby]\$/);
+      expect(sendRegistrationConfirmation).toHaveBeenCalledTimes(1);
+      expect(sendRegistrationConfirmation).toHaveBeenCalledWith(
+        registrationDto.email,
+        expect.stringMatching(
+          /^value-of-FRONTEND_URL\/auth\/registration-confirmation\?code=[0-9a-f-]{36}$/,
+        ),
+      );
+      expect(userDelete).not.toHaveBeenCalled();
+    });
+
+    it('кидает EMAIL_ALREADY_EXISTS, если email уже подтверждён', async () => {
+      // Arrange
+      findUnique
+        .mockResolvedValueOnce({
+          id: USER_ID,
+          email: registrationDto.email,
+          isConfirmed: true,
+        })
+        .mockResolvedValueOnce(null);
+
+      // Act
+      const error = await captureError(service.registration(registrationDto));
+
+      // Assert
+      expect(error.code).toBe(AUTH_ERROR_CODE.EMAIL_ALREADY_EXISTS);
+      expect(error.message).toBe(AUTH_ERROR_MESSAGE.EMAIL_ALREADY_EXISTS);
+      expect(userCreate).not.toHaveBeenCalled();
+      expect(sendRegistrationConfirmation).not.toHaveBeenCalled();
+    });
+
+    it('кидает USERNAME_ALREADY_EXISTS, если username уже подтверждён', async () => {
+      // Arrange
+      findUnique.mockResolvedValueOnce(null).mockResolvedValueOnce({
+        id: 'other-id',
+        username: registrationDto.username,
+        isConfirmed: true,
+      });
+
+      // Act
+      const error = await captureError(service.registration(registrationDto));
+
+      // Assert
+      expect(error.code).toBe(AUTH_ERROR_CODE.USERNAME_ALREADY_EXISTS);
+      expect(userCreate).not.toHaveBeenCalled();
+    });
+
+    it('удаляет неподтверждённого пользователя с тем же email и создаёт заново', async () => {
+      // Arrange
+      const oldId = 'old-unconfirmed-id';
+      findUnique
+        .mockResolvedValueOnce({
+          id: oldId,
+          email: registrationDto.email,
+          isConfirmed: false,
+        })
+        .mockResolvedValueOnce(null);
+      userCreate.mockResolvedValue({
+        id: USER_ID,
+        email: registrationDto.email,
+      });
+
+      // Act
+      await service.registration(registrationDto);
+
+      // Assert
+      expect(userDelete).toHaveBeenCalledWith({ where: { id: oldId } });
+      expect(userCreate).toHaveBeenCalledTimes(1);
+      expect(sendRegistrationConfirmation).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('registrationConfirmation', () => {
+    const CODE = '0f8fad5b-d9cb-469f-a165-70867728950e';
+
+    it('ставит isConfirmed=true и удаляет код', async () => {
+      // Arrange
+      emailConfirmationFindUnique.mockResolvedValue({
+        id: 'confirmation-id',
+        userId: USER_ID,
+        code: CODE,
+        expiresAt: new Date(Date.now() + 60_000),
+      });
+
+      // Act
+      await service.registrationConfirmation({ code: CODE });
+
+      // Assert
+      expect(transaction).toHaveBeenCalledTimes(1);
+      expect(userUpdate).toHaveBeenCalledWith({
+        where: { id: USER_ID },
+        data: { isConfirmed: true },
+      });
+      expect(emailConfirmationDelete).toHaveBeenCalledWith({
+        where: { id: 'confirmation-id' },
+      });
+    });
+
+    it('кидает CONFIRMATION_CODE_INVALID, если кода нет', async () => {
+      // Arrange
+      emailConfirmationFindUnique.mockResolvedValue(null);
+
+      // Act
+      const error = await captureError(
+        service.registrationConfirmation({ code: CODE }),
+      );
+
+      // Assert
+      expect(error.code).toBe(AUTH_ERROR_CODE.CONFIRMATION_CODE_INVALID);
+      expect(error.message).toBe(AUTH_ERROR_MESSAGE.CONFIRMATION_CODE_INVALID);
+      expect(transaction).not.toHaveBeenCalled();
+    });
+
+    it('кидает CONFIRMATION_CODE_EXPIRED, если TTL вышел', async () => {
+      // Arrange
+      emailConfirmationFindUnique.mockResolvedValue({
+        id: 'confirmation-id',
+        userId: USER_ID,
+        code: CODE,
+        expiresAt: new Date(Date.now() - 1_000),
+      });
+
+      // Act
+      const error = await captureError(
+        service.registrationConfirmation({ code: CODE }),
+      );
+
+      // Assert
+      expect(error.code).toBe(AUTH_ERROR_CODE.CONFIRMATION_CODE_EXPIRED);
+      expect(error.getStatus()).toBe(HttpStatus.BAD_REQUEST);
+      expect(transaction).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('registrationEmailResending', () => {
+    it('генерирует новый код и шлёт письмо неподтверждённому пользователю', async () => {
+      // Arrange
+      findUnique.mockResolvedValue({
+        id: USER_ID,
+        email: EMAIL,
+        isConfirmed: false,
+        emailConfirmation: { id: 'old', code: 'old-code' },
+      });
+
+      // Act
+      await service.registrationEmailResending({ email: EMAIL });
+
+      // Assert
+      expect(emailConfirmationUpsert).toHaveBeenCalledWith({
+        where: { userId: USER_ID },
+        create: expect.objectContaining({
+          userId: USER_ID,
+          code: expect.any(String),
+          expiresAt: expect.any(Date),
+        }),
+        update: expect.objectContaining({
+          code: expect.any(String),
+          expiresAt: expect.any(Date),
+        }),
+      });
+      expect(sendRegistrationConfirmation).toHaveBeenCalledWith(
+        EMAIL,
+        expect.stringContaining('registration-confirmation?code='),
+      );
+    });
+
+    it('кидает USER_NOT_FOUND со статусом 404, если email неизвестен', async () => {
+      // Arrange
+      findUnique.mockResolvedValue(null);
+
+      // Act
+      const error = await captureError(
+        service.registrationEmailResending({ email: 'nobody@example.com' }),
+      );
+
+      // Assert
+      expect(error.code).toBe(AUTH_ERROR_CODE.USER_NOT_FOUND);
+      expect(error.getStatus()).toBe(HttpStatus.NOT_FOUND);
+      expect(emailConfirmationUpsert).not.toHaveBeenCalled();
+    });
+
+    it('кидает EMAIL_ALREADY_CONFIRMED, если email уже подтверждён', async () => {
+      // Arrange
+      findUnique.mockResolvedValue({
+        id: USER_ID,
+        email: EMAIL,
+        isConfirmed: true,
+      });
+
+      // Act
+      const error = await captureError(
+        service.registrationEmailResending({ email: EMAIL }),
+      );
+
+      // Assert
+      expect(error.code).toBe(AUTH_ERROR_CODE.EMAIL_ALREADY_CONFIRMED);
+      expect(sendRegistrationConfirmation).not.toHaveBeenCalled();
+    });
   });
 });

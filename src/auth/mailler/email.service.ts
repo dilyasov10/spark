@@ -42,7 +42,7 @@ export class EmailService {
       );
       throw new AppException({
         code: ERROR_CODE.BAD_REQUEST,
-        message: 'Email send failed',
+        message: 'Не удалось отправить письмо',
       });
     }
   }

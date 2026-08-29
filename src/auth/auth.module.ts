@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtModule } from '@nestjs/jwt';
 import { PassportModule } from '@nestjs/passport';
+import { MailModule } from './mailler/mail.module';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 import { JwtStrategy } from './strategies/jwt.strategy';
@@ -12,10 +13,13 @@ import type { JwtExpiresIn } from './types/jwt-payload';
  *
  * Дефолтным секретом модуля становится access — refresh подписывается явным
  * оверрайдом в `AuthService`.
+ *
+ * `MailModule` нужен регистрации (письмо с кодом подтверждения).
  */
 @Module({
   imports: [
     PassportModule,
+    MailModule,
     JwtModule.registerAsync({
       inject: [ConfigService],
       useFactory: (configService: ConfigService) => ({
