@@ -1,0 +1,15 @@
+{
+  "moduleFileExtensions": ["js", "json", "ts"],
+  "rootDir": "../../../",
+  "testEnvironment": "node",
+  "testRegex": "apps/gateway/test/.*\\.e2e-spec\\.ts$",
+  "setupFiles": ["<rootDir>/apps/gateway/test/setup-e2e.ts"],
+  "transform": {
+    "^.+\\.(t|j)s$": "ts-jest"
+  },
+  "moduleNameMapper": {
+    "^(\\.{1,2}/.*)\\.js$": "$1",
+    "^@app/common(|/.*)$": "<rootDir>/libs/common/src$1",
+    "^@app/prisma(|/.*)$": "<rootDir>/libs/prisma/src$1"
+  }
+}

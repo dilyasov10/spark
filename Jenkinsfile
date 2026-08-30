@@ -58,8 +58,8 @@ pipeline {
         stage('Install dependencies') {
             steps {
                 script {
-                    // Клиент Prisma генерируется в src/generated и в git не
-                    // коммитится — без генерации тесты падают на импорте.
+                    // Клиент Prisma генерируется в libs/prisma/src/generated и
+                    // в git не коммитится — без генерации тесты падают на импорте.
                     // `prisma generate` в базу не ходит, URL нужен ему только
                     // формально.
                     sh '''
@@ -87,8 +87,10 @@ pipeline {
             }
         }
         stage('e2e tests') {
-            // Переменные окружения стадии не нужны: ни один e2e-тест в базу не
-            // ходит, PrismaService везде подменяется заглушкой. Живого
+            // Переменные окружения стадии не нужны: e2e поднимают только
+            // gateway, а он не ходит ни в базу, ни в брокер — клиент
+            // auth-микросервиса подменяется заглушкой (apps/gateway/test/
+            // fake-auth-client.ts). Живого
             // DATABASE_URL здесь стоял credential 'neon-database-url', но
             // биндинг вычисляется до тела стадии — при отсутствии credential в
             // Jenkins сборка обрывалась с `ERROR: neon-database-url`, не
@@ -160,10 +162,15 @@ pipeline {
                     // стадии одинаково, а лечатся по-разному.
                     script {
                         try {
-                            sh "kubectl rollout status deployment/${env.DEPLOYMENT_NAME} --namespace=${env.NAMESPACE} --timeout=120s"
+                            // Деплойментов теперь три — по приложению монорепы.
+                            // Имена задаёт deployment.yaml: gateway идёт под
+                            // базовым именем, микросервисы с суффиксом.
+                            for (suffix in ['', '-auth', '-notifications']) {
+                                sh "kubectl rollout status deployment/${env.DEPLOYMENT_NAME}${suffix} --namespace=${env.NAMESPACE} --timeout=120s"
+                            }
                         } catch (rolloutError) {
                             sh "kubectl get pods -n ${env.NAMESPACE} -o wide"
-                            sh "kubectl describe deployment/${env.DEPLOYMENT_NAME} -n ${env.NAMESPACE}"
+                            sh "kubectl describe deployments -l app=${env.PROJECT} -n ${env.NAMESPACE}"
                             sh "kubectl describe pods -l project=${env.PROJECT} -n ${env.NAMESPACE}"
                             // Логи есть не всегда: при ImagePullBackOff
                             // контейнер не стартовал, и команда вернёт ошибку —

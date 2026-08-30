@@ -32,12 +32,15 @@ RUN pnpm install --frozen-lockfile
 
 COPY . .
 
-# Клиент Prisma лежит в src/generated и в git не коммитится — без генерации
-# сборка падает на несуществующем импорте.
+# Клиент Prisma лежит в libs/prisma/src/generated и в git не коммитится — без
+# генерации сборка падает на несуществующем импорте.
 # `prisma generate` в базу не ходит, но prisma.config.ts требует заданного URL:
 # подставляем заглушку, соединение по ней не открывается.
 RUN DIRECT_URL="postgresql://build:build@localhost:5432/build" pnpm db:generate
 
+# Собираются все три приложения монорепы: образ один на всех, а какое из них
+# запускать — решает `command` в манифесте деплоя. Три отдельных образа
+# отличались бы только точкой входа, зато тянули бы три сборки и три пуша.
 RUN pnpm build
 
 # NODE_ENV выставляется только сейчас: будь он production до установки, pnpm
@@ -53,4 +56,9 @@ USER node
 
 # Не `pnpm start`: это `nest start`, дев-команда — она пересобирала бы проект
 # при каждом старте контейнера и тянула бы devDependencies в рантайм.
-CMD ["node", "dist/main"]
+#
+# По умолчанию поднимается gateway — единственное приложение с HTTP-портом.
+# Микросервисы запускаются тем же образом с другим `command`:
+#   node dist/apps/auth/main
+#   node dist/apps/notifications/main
+CMD ["node", "dist/apps/gateway/main"]

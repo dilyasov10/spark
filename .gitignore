@@ -29,7 +29,7 @@ coverage
 *.tsbuildinfo
 
 # Generated Prisma Client
-/src/generated
+/libs/prisma/src/generated
 
 # Agent instructions
 CLAUDE.md
