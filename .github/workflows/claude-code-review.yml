@@ -1,0 +1,69 @@
+name: Claude Code Review
+
+# Автоматическое ревью каждого PR против API-контракта из CLAUDE.md.
+# Правила ревью не дублируются здесь — они лежат в .claude/commands/review-pr.md,
+# который к этому моменту уже выкачан вместе с репозиторием.
+#
+# Аутентификация — по подписке Claude Pro/Max, а не по API-ключу.
+# Токен генерируется локально командой `claude setup-token` и кладётся секретом
+# CLAUDE_CODE_OAUTH_TOKEN: Settings → Secrets and variables → Actions →
+# New repository secret. Значение токена в репозитории не хранится.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths-ignore:
+      - 'libs/prisma/src/generated/**'
+      - 'pnpm-lock.yaml'
+      - '**/*.md'
+
+jobs:
+  review:
+    # Черновики не ревьюем — автор ещё правит.
+    if: github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+      id-token: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+
+      - name: Claude Code Review
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          track_progress: true
+          prompt: |
+            REPO: ${{ github.repository }}
+            PR NUMBER: ${{ github.event.pull_request.number }}
+
+            Ветка PR уже выкачана в текущую рабочую директорию.
+
+            Прочитай два файла и следуй им как инструкции к этому ревью:
+
+            1. `CLAUDE.md` — контракт с фронтендом и правила проекта.
+            2. `.claude/commands/review-pr.md` — чеклист ревью и формат отчёта.
+
+            Затем отревьюй дифф этого PR (`gh pr diff ${{ github.event.pull_request.number }}`)
+            ровно по этому чеклисту.
+
+            Отдельно про формат вывода в GitHub:
+
+            - Конкретные замечания — инлайн-комментариями к строкам диффа.
+            - Общий вывод — одним верхнеуровневым комментарием: сводка по PR и вердикт
+              Approve / Warning / Block.
+            - Каждое замечание начинай с уровня в квадратных скобках: `[CRITICAL]`,
+              `[HIGH]`, `[MEDIUM]`, `[LOW]`.
+            - Не оставляй замечаний к файлам в `libs/prisma/src/generated/**`, `dist/**`
+              и к `pnpm-lock.yaml` — это сгенерированный код.
+            - Не выдумывай находки ради объёма. Если нарушений нет — так и напиши одним
+              комментарием, инлайн-замечаний не оставляй.
+
+            Отвечай по-русски.
+
+          claude_args: |
+            --allowedTools "mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr checks:*)"
