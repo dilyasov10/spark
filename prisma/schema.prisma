@@ -5,7 +5,7 @@
 
 generator client {
   provider = "prisma-client"
-  output   = "../src/generated/prisma"
+  output   = "../libs/prisma/src/generated/prisma"
   // NestJS собирается в CommonJS; без этого генератор выдаёт ESM с
   // import.meta.url, и dist падает на старте.
   moduleFormat = "cjs"

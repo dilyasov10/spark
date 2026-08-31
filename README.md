@@ -25,11 +25,44 @@
 
 [Nest](https://github.com/nestjs/nest) framework TypeScript starter repository.
 
+## Архитектура
+
+Монорепа Nest: три приложения в `apps/` и общий код в `libs/`.
+
+| Приложение | Что делает | Транспорт |
+|---|---|---|
+| `apps/gateway` | Единственный HTTP-вход: роуты, валидация, Swagger, cookie | HTTP + клиент RabbitMQ |
+| `apps/auth` | Проверка пароля, выпуск токенов, чтение пользователей из БД | слушает очередь `auth_queue` |
+| `apps/notifications` | Отправка писем через SMTP | слушает очередь `notifications_queue` |
+
+| Библиотека | Что внутри |
+|---|---|
+| `libs/common` (`@app/common`) | Контракт ошибок, валидация, Swagger, контракты сообщений, обвязка RabbitMQ |
+| `libs/prisma` (`@app/prisma`) | `PrismaService` и сгенерированный клиент |
+
+В базу ходит только `auth`, наружу торчит только `gateway`. Между ними — RabbitMQ:
+запрос-ответ (`ClientProxy.send`), а не события, потому что HTTP-ответ клиенту всё равно
+нужно дождаться.
+
+Доменные ошибки переживают дорогу через брокер: в микросервисе `RpcExceptionsFilter`
+превращает `AppException` в payload с `code`, `message` и статусом, а в gateway
+`fromRpcError` собирает его обратно — фронтенд получает обычное тело ошибки из
+контракта (CLAUDE.md, правило 5). Всё, что не доменная ошибка — таймаут, обрыв связи, —
+становится обезличенной 500.
+
 ## Project setup
 
 ```bash
 $ pnpm install
 ```
+
+Кроме Postgres, для запуска нужен RabbitMQ. Локально проще всего контейнером:
+
+```bash
+$ docker run -d -p 5672:5672 -p 15672:15672 rabbitmq:4-management
+```
+
+Адрес брокера и имена очередей — в `.env` (см. `.env.example`).
 
 ## База данных
 
@@ -73,16 +106,27 @@ $ NODE_ENV=production pnpm db:seed
 
 ## Compile and run the project
 
-```bash
-# development
-$ pnpm run start
+Приложений три, и запускать их надо все — gateway без микросервисов ответит 500 по
+таймауту. Каждой команде нужен свой терминал.
 
-# watch mode
-$ pnpm run start:dev
+```bash
+# watch mode: gateway, auth, notifications
+$ pnpm start:dev
+$ pnpm start:dev:auth
+$ pnpm start:dev:notifications
+```
+
+```bash
+# сборка всех трёх приложений в dist/apps/<app>/main.js
+$ pnpm build
 
 # production mode
-$ pnpm run start:prod
+$ pnpm start:prod
+$ pnpm start:prod:auth
+$ pnpm start:prod:notifications
 ```
+
+Собрать что-то одно: `pnpm build:gateway`, `pnpm build:auth`, `pnpm build:notifications`.
 
 ## Run tests
 
