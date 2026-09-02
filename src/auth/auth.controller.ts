@@ -18,7 +18,11 @@ import {
 } from '@nestjs/swagger';
 import type { Response } from 'express';
 import { ApiErrorResponses } from '../common/swagger/api-error-responses.decorator';
-import { REFRESH_TOKEN_COOKIE, refreshCookieOptions } from './auth.constants';
+import {
+  REFRESH_TOKEN_COOKIE,
+  clearRefreshCookieOptions,
+  refreshCookieOptions,
+} from './auth.constants';
 import { AuthService } from './auth.service';
 import { CurrentUser } from './decorators/current-user.decorator';
 import { LoginResponseDto } from './dto/login-response.dto';
@@ -28,6 +32,7 @@ import { PasswordRecoveryDto } from './dto/password-recovery.dto';
 import { RegistrationConfirmationDto } from './dto/registration-confirmation.dto';
 import { RegistrationEmailResendingDto } from './dto/registration-email-resending.dto';
 import { RegistrationDto } from './dto/registration.dto';
+import { LogoutResponseDto } from './dto/logout-response.dto';
 import { UserProfileDto } from './dto/user-profile.dto';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import type { AuthenticatedUser } from './types/jwt-payload';
@@ -141,6 +146,31 @@ export class AuthController {
     );
 
     return { accessToken };
+  }
+
+  @Post('logout')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Выход из аккаунта',
+    description:
+      'Гасит cookie с refresh-токеном. Токена в заголовке не требует и всегда ' +
+      'отвечает 200 — выйти нужно уметь и тогда, когда access-токен уже ' +
+      'протух. Сам access-токен остаётся валидным до конца своего срока: ' +
+      'сервер его не отзывает, фронтенду нужно стереть токен у себя.',
+  })
+  @ApiOkResponse({ type: LogoutResponseDto, description: 'Выход выполнен' })
+  logout(@Res({ passthrough: true }) response: Response): LogoutResponseDto {
+    // Без `JwtAuthGuard` намеренно. Отзывать на сервере нечего — refresh-токен
+    // нигде не хранится, — так что гарда добавила бы только 401 на протухшем
+    // токене: пользователь остался бы с живой cookie и без способа её погасить.
+    // Худшее, что даёт открытый эндпоинт, — чужой сайт может разлогинить
+    // пользователя; данных это не раскрывает и прав не даёт.
+    response.clearCookie(
+      REFRESH_TOKEN_COOKIE,
+      clearRefreshCookieOptions(this.isProduction),
+    );
+
+    return { success: true };
   }
 
   @Get('me')

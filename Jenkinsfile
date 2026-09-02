@@ -1,5 +1,31 @@
 def app
 
+/**
+ * Едет ли из этой сборки деплой в прод.
+ *
+ * Раньше стояло `when { branch 'main' }`. Эта проверка смотрит в BRANCH_NAME,
+ * а её выставляет только Multibranch Pipeline — в остальных типах джоб
+ * переменная пуста, условие ложно всегда, и деплойные стадии пропускались даже
+ * на полностью зелёном прогоне.
+ *
+ * Единственная джоба проекта — `prd-nest-backend-pull-request` на плагине
+ * ghprb: она собирает merge-ref пул-реквеста (`origin/pr/N/merge`), то есть
+ * содержимое main плюс коммиты PR. Поэтому решение принимаем по ветке, в
+ * которую нацелен PR: `ghprbTargetBranch`. Джобы, собирающей main напрямую,
+ * в Jenkins нет и завести её некому.
+ *
+ * Ветки BRANCH_NAME и GIT_BRANCH проверяются следом — чтобы пайплайн отработал
+ * без правок, если джоба на main всё-таки появится, хоть multibranch, хоть
+ * обычная с Branch Specifier `*​/main`.
+ */
+def isDeployBuild() {
+    if (env.ghprbTargetBranch) {
+        return env.ghprbTargetBranch == 'main'
+    }
+
+    return env.BRANCH_NAME == 'main' || (env.GIT_BRANCH ?: '') ==~ /(origin\/)?main/
+}
+
 pipeline {
     agent any
     environment {
@@ -22,6 +48,11 @@ pipeline {
         stage('Clone repository') {
             steps {
                 checkout scm
+                // Пропуск деплойных стадий выглядит в Stage View одинаково при
+                // любой причине — печатаем решение и его входные данные, чтобы
+                // не разбирать это по логу заново.
+                echo "ghprbTargetBranch=${env.ghprbTargetBranch} BRANCH_NAME=${env.BRANCH_NAME} GIT_BRANCH=${env.GIT_BRANCH}"
+                echo "Деплойные стадии: ${isDeployBuild() ? 'выполняются' : 'пропускаются'}"
             }
         }
         stage('Install dependencies') {
@@ -75,7 +106,7 @@ pipeline {
             }
         }
         stage('Build docker image') {
-            when { branch 'main' }
+            when { expression { isDeployBuild() } }
             steps {
                 echo "Build image started..."
                     script {
@@ -85,7 +116,7 @@ pipeline {
             }
         }
         stage('Push docker image') {
-             when { branch 'main' }
+             when { expression { isDeployBuild() } }
              steps {
                  echo "Push image started..."
                      script {
@@ -97,7 +128,7 @@ pipeline {
              }
        }
        stage('Delete image local') {
-             when { branch 'main' }
+             when { expression { isDeployBuild() } }
              steps {
                  script {
                     sh "docker rmi -f ${env.DOCKER_BUILD_NAME}"
@@ -105,7 +136,7 @@ pipeline {
              }
         }
         stage('Preparing deployment') {
-             when { branch 'main' }
+             when { expression { isDeployBuild() } }
              steps {
                  echo "Preparing started..."
                      sh 'ls -ltr'
@@ -116,12 +147,35 @@ pipeline {
              }
         }
         stage('Deploy to Kubernetes') {
-             when { branch 'main' }
+             when { expression { isDeployBuild() } }
              steps {
                  withKubeConfig([credentialsId: 'prod-kubernetes']) {
                     sh 'kubectl apply -f deployment.yaml'
-                    sh "kubectl rollout status deployment/${env.DEPLOYMENT_NAME} --namespace=${env.NAMESPACE}"
-                    sh "kubectl get services -o wide"
+
+                    // `rollout status` при неподнявшемся поде отваливается по
+                    // таймауту с `exceeded its progress deadline` — причину он
+                    // не показывает. Ловим падение и выводим состояние пода:
+                    // CrashLoopBackOff (нет Secret, приложение упало на старте)
+                    // и ImagePullBackOff (образ недоступен) выглядят в статусе
+                    // стадии одинаково, а лечатся по-разному.
+                    script {
+                        try {
+                            sh "kubectl rollout status deployment/${env.DEPLOYMENT_NAME} --namespace=${env.NAMESPACE} --timeout=120s"
+                        } catch (rolloutError) {
+                            sh "kubectl get pods -n ${env.NAMESPACE} -o wide"
+                            sh "kubectl describe deployment/${env.DEPLOYMENT_NAME} -n ${env.NAMESPACE}"
+                            sh "kubectl describe pods -l project=${env.PROJECT} -n ${env.NAMESPACE}"
+                            // Логи есть не всегда: при ImagePullBackOff
+                            // контейнер не стартовал, и команда вернёт ошибку —
+                            // она не должна перебивать исходную.
+                            sh "kubectl logs -l project=${env.PROJECT} -n ${env.NAMESPACE} --tail=100 --all-containers || true"
+                            sh "kubectl get secret nest-backend-secrets -n ${env.NAMESPACE} || true"
+
+                            throw rolloutError
+                        }
+                    }
+
+                    sh "kubectl get services -n ${env.NAMESPACE} -o wide"
                  }
              }
         }

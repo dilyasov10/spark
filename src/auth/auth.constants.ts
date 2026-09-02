@@ -26,6 +26,11 @@ export const REFRESH_TOKEN_COOKIE_PATH = `/${API_PREFIX}/auth`;
 const REFRESH_TOKEN_COOKIE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 
 /**
+ * Атрибуты, по которым браузер отличает одну cookie от другой. Вынесены
+ * отдельно, потому что выдача и гашение обязаны совпадать до последнего поля:
+ * cookie с тем же именем, но другим `path` или `sameSite`, для браузера чужая,
+ * и на выходе из аккаунта она не удалится.
+ *
  * Refresh-токен уходит только в httpOnly-cookie: в `localStorage` его достал бы
  * любой XSS, а из cookie с этим флагом JS его не прочитает.
  *
@@ -33,12 +38,32 @@ const REFRESH_TOKEN_COOKIE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
  * принимают его только вместе с `secure`, а `secure` не работает по http —
  * поэтому локально режим мягче.
  */
-export function refreshCookieOptions(isProduction: boolean): CookieOptions {
+function refreshCookieAttributes(isProduction: boolean): CookieOptions {
   return {
     httpOnly: true,
     secure: isProduction,
     sameSite: isProduction ? 'none' : 'lax',
     path: REFRESH_TOKEN_COOKIE_PATH,
+  };
+}
+
+/** Опции cookie, которую выдаём при входе. */
+export function refreshCookieOptions(isProduction: boolean): CookieOptions {
+  return {
+    ...refreshCookieAttributes(isProduction),
     maxAge: REFRESH_TOKEN_COOKIE_MAX_AGE_MS,
   };
+}
+
+/**
+ * Опции для `res.clearCookie` при выходе: те же атрибуты, но без `maxAge` —
+ * гашение это та же cookie с датой истечения в прошлом, и срок жизни ей уже
+ * не нужен. Express выбрасывает `maxAge` в `clearCookie` и сам, но передавать
+ * туда опции выдачи — значит держать выход из аккаунта на детали реализации
+ * соседней библиотеки.
+ */
+export function clearRefreshCookieOptions(
+  isProduction: boolean,
+): CookieOptions {
+  return refreshCookieAttributes(isProduction);
 }
