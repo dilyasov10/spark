@@ -7,6 +7,12 @@ import { API_PREFIX } from '../common/bootstrap/setup-app';
  */
 export const BCRYPT_ROUNDS = 10;
 
+/** TTL кода подтверждения email (1 час), как в плане UC-1. */
+export const EMAIL_CONFIRMATION_TTL_MS = 60 * 60 * 1000;
+
+/** TTL кода восстановления пароля (1 час), как в плане UC-3. */
+export const PASSWORD_RECOVERY_TTL_MS = 60 * 60 * 1000;
+
 /** Имя cookie с refresh-токеном. Часть контракта с фронтендом. */
 export const REFRESH_TOKEN_COOKIE = 'refreshToken';
 

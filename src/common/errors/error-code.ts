@@ -5,8 +5,7 @@ import { HttpStatus } from '@nestjs/common';
  * Фронтенд ветвится по `code`, поэтому переименование ломает клиент так же,
  * как переименование поля: сначала предупреждаем, потом мержим.
  *
- * Здесь лежат только общие коды. Доменные (`EMAIL_ALREADY_EXISTS`,
- * `CONFIRMATION_CODE_EXPIRED`) объявляются рядом со своим модулем.
+ * Здесь лежат только общие коды. Доменные auth-коды — в `auth/auth.error-code.ts`.
  */
 export const ERROR_CODE = {
   VALIDATION_ERROR: 'VALIDATION_ERROR',

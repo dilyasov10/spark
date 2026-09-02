@@ -4,13 +4,14 @@
 // Datasource URL живёт в prisma.config.ts (Prisma 7), а не здесь.
 
 generator client {
-  provider = "prisma-client"
-  output   = "../src/generated/prisma"
+  provider     = "prisma-client"
+  output       = "../src/generated/prisma"
   // NestJS собирается в CommonJS; без этого генератор выдаёт ESM с
   // import.meta.url, и dist падает на старте.
   moduleFormat = "cjs"
 }
 
+// WebStorm ругается но в Prisma 7 url находится в prisma.config.ts и там должен быть
 datasource db {
   provider = "postgresql"
 }
@@ -19,13 +20,18 @@ model User {
   id           String   @id @default(uuid())
   username     String   @unique
   email        String   @unique
-  passwordHash String
+  passwordHash String?
   firstName    String
   lastName     String
+  isConfirmed  Boolean  @default(false)
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
-  posts Post[]
+  posts             Post[]
+  emailConfirmation EmailConfirmation?
+  passwordRecovery  PasswordRecovery?
+  sessions          Session[]
+  providers         OAuthProvider[]
 }
 
 model Post {
@@ -41,4 +47,46 @@ model Post {
   author User @relation(fields: [authorId], references: [id], onDelete: Cascade)
 
   @@index([authorId])
+}
+
+model EmailConfirmation {
+  id        String   @id @default(uuid())
+  userId    String   @unique
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  code      String   @unique
+  expiresAt DateTime
+}
+
+model PasswordRecovery {
+  id        String   @id @default(uuid())
+  userId    String   @unique
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  code      String   @unique
+  expiresAt DateTime
+}
+
+model Session {
+  id               String   @id @default(uuid())
+  userId           String
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  deviceId         String
+  ip               String
+  deviceName       String
+  refreshTokenHash String
+  lastActiveDate   DateTime
+  expiresAt        DateTime
+
+  @@unique([userId, deviceId])
+  @@index([userId])
+}
+
+model OAuthProvider {
+  id         String @id @default(uuid())
+  userId     String
+  user       User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  provider   String
+  providerId String
+
+  @@unique([provider, providerId])
+  @@index([userId])
 }
