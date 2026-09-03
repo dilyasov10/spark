@@ -34,6 +34,14 @@ export const AUTH_ERROR_CODE = {
   RECOVERY_CODE_INVALID: 'RECOVERY_CODE_INVALID',
   RECOVERY_CODE_EXPIRED: 'RECOVERY_CODE_EXPIRED',
   RECAPTCHA_FAILED: 'RECAPTCHA_FAILED',
+
+  /**
+   * Провайдер не вернул email (нет scope или почта скрыта).
+   * Без email пользователя не создаём: поле в схеме обязательное и уникальное.
+   */
+  OAUTH_EMAIL_REQUIRED: 'OAUTH_EMAIL_REQUIRED',
+  /** Обмен code на профиль не удался или пользователь отказал в доступе. */
+  OAUTH_FAILED: 'OAUTH_FAILED',
 } as const;
 
 export type AuthErrorCode =
@@ -53,4 +61,7 @@ export const AUTH_ERROR_MESSAGE = {
   RECOVERY_CODE_INVALID: 'Код восстановления недействителен',
   RECOVERY_CODE_EXPIRED: 'Ссылка восстановления истекла',
   RECAPTCHA_FAILED: 'Проверка reCAPTCHA не пройдена',
+  OAUTH_EMAIL_REQUIRED:
+    'Провайдер не предоставил email. Разрешите доступ к почте и попробуйте снова',
+  OAUTH_FAILED: 'Не удалось войти через OAuth. Попробуйте ещё раз',
 } as const;

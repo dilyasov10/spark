@@ -5,6 +5,8 @@ import { PassportModule } from '@nestjs/passport';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 import { MailModule } from './mailler/mail.module';
+import { GithubOAuthService } from './oauth/github-oauth.service';
+import { GoogleOAuthService } from './oauth/google-oauth.service';
 import { RecaptchaService } from './recaptcha/recaptcha.service';
 import { JwtStrategy } from './strategies/jwt.strategy';
 import type { JwtExpiresIn } from './types/jwt-payload';
@@ -17,6 +19,7 @@ import type { JwtExpiresIn } from './types/jwt-payload';
  *
  * `MailModule` нужен регистрации (письмо с кодом подтверждения).
  * `RecaptchaService` — проверка токена на password-recovery.
+ * `GoogleOAuthService` / `GithubOAuthService` — обмен code на профиль.
  */
 @Module({
   imports: [
@@ -35,6 +38,12 @@ import type { JwtExpiresIn } from './types/jwt-payload';
     }),
   ],
   controllers: [AuthController],
-  providers: [AuthService, JwtStrategy, RecaptchaService],
+  providers: [
+    AuthService,
+    JwtStrategy,
+    RecaptchaService,
+    GoogleOAuthService,
+    GithubOAuthService,
+  ],
 })
 export class AuthModule {}

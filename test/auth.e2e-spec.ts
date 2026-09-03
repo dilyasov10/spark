@@ -73,53 +73,56 @@ describe('Авторизация (e2e)', () => {
     const response = await request(app.getHttpServer())
       .post('/api/auth/login')
       .send({ email: USER.email, password })
-      .expect(HttpStatus.OK);
+      .expect(HttpStatus.NO_CONTENT);
 
-    return (response.body as { accessToken: string }).accessToken;
+    const cookies = response.headers['set-cookie'] as unknown as string[];
+    return cookies.map((cookie) => cookie.split(';')[0]).join('; ');
   }
 
   describe('POST /api/auth/login', () => {
-    it('отвечает 200, а не 201, и отдаёт accessToken', async () => {
+    it('отвечает 204 и не кладёт токены в тело', async () => {
       // Arrange
       // Act
       const response = await request(app.getHttpServer())
         .post('/api/auth/login')
         .send({ email: USER.email, password: PASSWORD })
-        .expect(HttpStatus.OK);
+        .expect(HttpStatus.NO_CONTENT);
 
       // Assert
-      const body = response.body as { accessToken: string };
-      expect(typeof body.accessToken).toBe('string');
-      expect(body.accessToken.length).toBeGreaterThan(0);
+      expect(response.body).toEqual({});
     });
 
-    it('кладёт refresh-токен в httpOnly-cookie, а не в тело ответа', async () => {
+    it('кладёт access и refresh в httpOnly-cookie', async () => {
       // Arrange
       // Act
       const response = await request(app.getHttpServer())
         .post('/api/auth/login')
         .send({ email: USER.email, password: PASSWORD })
-        .expect(HttpStatus.OK);
+        .expect(HttpStatus.NO_CONTENT);
 
       // Assert
       const cookies = response.headers['set-cookie'] as unknown as string[];
+      const accessCookie = cookies.find((cookie) =>
+        cookie.startsWith('accessToken='),
+      );
       const refreshCookie = cookies.find((cookie) =>
         cookie.startsWith('refreshToken='),
       );
 
+      expect(accessCookie).toBeDefined();
+      expect(accessCookie).toContain('HttpOnly');
+      expect(accessCookie).toContain('Path=/api');
+      expect(accessCookie).not.toContain('Path=/api/auth');
       expect(refreshCookie).toBeDefined();
       expect(refreshCookie).toContain('HttpOnly');
       expect(refreshCookie).toContain('Path=/api/auth');
-      expect(Object.keys(response.body as object)).toEqual(['accessToken']);
     });
 
     it('не отдаёт passwordHash ни в каком виде', async () => {
       // Arrange
       // Act
       const response = await request(app.getHttpServer())
-        .post('/api/auth/login')
-        .send({ email: USER.email, password: PASSWORD })
-        .expect(HttpStatus.OK);
+        .expect(HttpStatus.NO_CONTENT);
 
       // Assert
       expect(JSON.stringify(response.body)).not.toContain('passwordHash');
@@ -188,15 +191,87 @@ describe('Авторизация (e2e)', () => {
     });
   });
 
+  describe('GET /api/auth/oauth/google', () => {
+    it('редиректит на Google и ставит csrf-cookie state', async () => {
+      const response = await request(app.getHttpServer())
+        .get('/api/auth/oauth/google')
+        .redirects(0)
+        .expect(HttpStatus.FOUND);
+
+      const location = new URL(response.headers.location);
+      expect(location.origin + location.pathname).toBe(
+        'https://accounts.google.com/o/oauth2/v2/auth',
+      );
+      expect(location.searchParams.get('scope')).toBe('openid email profile');
+
+      const cookies = response.headers['set-cookie'] as unknown as string[];
+      const stateCookie = cookies.find((cookie) =>
+        cookie.startsWith('oauthGoogleState='),
+      );
+      expect(stateCookie).toBeDefined();
+      expect(stateCookie).toContain('HttpOnly');
+      expect(stateCookie).toContain('Path=/api/auth');
+    });
+  });
+
+  describe('GET /api/auth/oauth/google/callback', () => {
+    it('редиректит на фронт с error, если Google не прислал code', async () => {
+      const response = await request(app.getHttpServer())
+        .get('/api/auth/oauth/google/callback')
+        .redirects(0)
+        .expect(HttpStatus.FOUND);
+
+      expect(response.headers.location).toBe(
+        'http://localhost:3001/auth/oauth?error=OAUTH_FAILED',
+      );
+    });
+  });
+
+  describe('GET /api/auth/oauth/github', () => {
+    it('редиректит на GitHub и ставит csrf-cookie state', async () => {
+      const response = await request(app.getHttpServer())
+        .get('/api/auth/oauth/github')
+        .redirects(0)
+        .expect(HttpStatus.FOUND);
+
+      const location = new URL(response.headers.location);
+      expect(location.origin + location.pathname).toBe(
+        'https://github.com/login/oauth/authorize',
+      );
+      expect(location.searchParams.get('scope')).toBe('read:user user:email');
+
+      const cookies = response.headers['set-cookie'] as unknown as string[];
+      const stateCookie = cookies.find((cookie) =>
+        cookie.startsWith('oauthGithubState='),
+      );
+      expect(stateCookie).toBeDefined();
+      expect(stateCookie).toContain('HttpOnly');
+      expect(stateCookie).toContain('Path=/api/auth');
+    });
+  });
+
+  describe('GET /api/auth/oauth/github/callback', () => {
+    it('редиректит на фронт с error, если GitHub не прислал code', async () => {
+      const response = await request(app.getHttpServer())
+        .get('/api/auth/oauth/github/callback')
+        .redirects(0)
+        .expect(HttpStatus.FOUND);
+
+      expect(response.headers.location).toBe(
+        'http://localhost:3001/auth/oauth?error=OAUTH_FAILED',
+      );
+    });
+  });
+
   describe('GET /api/auth/me', () => {
-    it('отдаёт профиль по валидному токену', async () => {
+    it('отдаёт профиль по валидной access-cookie', async () => {
       // Arrange
-      const accessToken = await login();
+      const cookie = await login();
 
       // Act
       const response = await request(app.getHttpServer())
         .get('/api/auth/me')
-        .set('Authorization', `Bearer ${accessToken}`)
+        .set('Cookie', cookie)
         .expect(HttpStatus.OK);
 
       // Assert: id — UUID-строка, createdAt — ISO 8601 в UTC.
@@ -233,7 +308,7 @@ describe('Авторизация (e2e)', () => {
       // Act
       const response = await request(app.getHttpServer())
         .get('/api/auth/me')
-        .set('Authorization', `Bearer ${forgedToken}`)
+        .set('Cookie', `accessToken=${forgedToken}`)
         .expect(HttpStatus.UNAUTHORIZED);
 
       // Assert
