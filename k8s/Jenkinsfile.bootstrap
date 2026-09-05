@@ -1,0 +1,155 @@
+/*
+ * Разовая подготовка окружения: неймспейс, Secret, RabbitMQ, Ingress.
+ *
+ * Отдельная джоба, а не стадия в пайплайне сервиса: это инфраструктура, она
+ * живёт дольше отдельной сборки и пересоздавать её на каждый деплой не нужно.
+ * Запускается вручную, кнопкой «Собрать с параметрами».
+ *
+ * Существует потому, что прямого доступа к кластеру у команды нет — kubeconfig
+ * лежит только в Jenkins, в credential `prod-kubernetes`. Всё, что в обычном
+ * проекте делают руками через kubectl, здесь приходится проводить джобой.
+ *
+ * Настройка джобы (тип — Pipeline, Script Path — k8s/Jenkinsfile.bootstrap):
+ *   credentials `prod-kubernetes` — kubeconfig, тот же, что у сервисных джоб;
+ *   credentials `nest-backend-env` — тип Secret file, обычный .env со всеми
+ *     ключами из docs/deploy.md. Один файл вместо десятка отдельных строковых
+ *     credentials: ключи не разъезжаются и добавить новый можно, не трогая
+ *     конфиг джобы.
+ *
+ * Стадии по умолчанию выключены — первый прогон только показывает состояние
+ * кластера и ничего не меняет.
+ */
+pipeline {
+    agent any
+
+    parameters {
+        string(
+            name: 'NAMESPACE',
+            defaultValue: 'sprak-by-ru',
+            description: 'Неймспейс окружения'
+        )
+        string(
+            name: 'API_HOST',
+            defaultValue: '',
+            description: 'Домен бэкенда, например api.spark.ru. Нужен только для стадии Ingress.'
+        )
+        string(
+            name: 'INGRESS_CLASS',
+            defaultValue: 'nginx',
+            description: 'Имя ingress-класса. Фактическое смотреть в выводе стадии Cluster info.'
+        )
+        string(
+            name: 'CLUSTER_ISSUER',
+            defaultValue: 'letsencrypt-prod',
+            description: 'ClusterIssuer cert-manager. Пусто — TLS не настраивается, секрет gateway-tls создаётся отдельно.'
+        )
+        booleanParam(name: 'APPLY_NAMESPACE', defaultValue: false, description: 'Создать неймспейс')
+        booleanParam(name: 'APPLY_SECRET', defaultValue: false, description: 'Создать/обновить Secret nest-backend-secrets')
+        booleanParam(name: 'APPLY_RABBITMQ', defaultValue: false, description: 'Развернуть брокер')
+        booleanParam(name: 'APPLY_INGRESS', defaultValue: false, description: 'Применить Ingress (нужен API_HOST)')
+    }
+
+    stages {
+        stage('Cluster info') {
+            steps {
+                withKubeConfig([credentialsId: 'prod-kubernetes']) {
+                    // Без прямого доступа к кластеру это единственный способ
+                    // узнать, какой ingress-контроллер стоит и есть ли
+                    // cert-manager. От первого зависит ingressClassName, от
+                    // второго — выпуск сертификата.
+                    sh 'kubectl get ingressclass || echo "ingressclass не найден — контроллера в кластере нет"'
+                    sh 'kubectl get pods -A | grep -Ei "ingress|traefik" || echo "подов ingress-контроллера не видно"'
+                    sh 'kubectl get clusterissuer || echo "clusterissuer не найден — cert-manager не установлен"'
+                    sh 'kubectl get storageclass || true'
+                    sh "kubectl get all -n ${params.NAMESPACE} || echo 'неймспейс ${params.NAMESPACE} ещё не создан'"
+                }
+            }
+        }
+
+        stage('Namespace') {
+            when { expression { params.APPLY_NAMESPACE } }
+            steps {
+                withKubeConfig([credentialsId: 'prod-kubernetes']) {
+                    // create + apply вместо просто create: джобу перезапускают,
+                    // и на существующем неймспейсе create упал бы с AlreadyExists.
+                    sh """
+                       kubectl create namespace ${params.NAMESPACE} \
+                         --dry-run=client -o yaml | kubectl apply -f -
+                    """
+                }
+            }
+        }
+
+        stage('Secret') {
+            when { expression { params.APPLY_SECRET } }
+            steps {
+                // Файл кладётся во временный путь и удаляется после стадии —
+                // в рабочей копии Jenkins ему делать нечего.
+                withCredentials([file(credentialsId: 'nest-backend-env', variable: 'ENV_FILE')]) {
+                    withKubeConfig([credentialsId: 'prod-kubernetes']) {
+                        // --dry-run + apply, чтобы стадия была идемпотентной:
+                        // при смене пароля джобу просто перезапускают.
+                        // Значения не печатаются: вывод kubectl уходит в лог
+                        // сборки, который виден всем с доступом к джобе.
+                        sh """
+                           set +x
+                           kubectl create secret generic nest-backend-secrets \
+                             --namespace=${params.NAMESPACE} \
+                             --from-env-file="\$ENV_FILE" \
+                             --dry-run=client -o yaml | kubectl apply -f - > /dev/null
+                           echo "Secret nest-backend-secrets применён"
+                        """
+                        // describe печатает имена ключей и размеры значений, но
+                        // не сами значения — этого хватает, чтобы убедиться,
+                        // что в файле не забыт ни один ключ.
+                        sh "kubectl -n ${params.NAMESPACE} describe secret nest-backend-secrets"
+                    }
+                }
+            }
+        }
+
+        stage('RabbitMQ') {
+            when { expression { params.APPLY_RABBITMQ } }
+            steps {
+                withKubeConfig([credentialsId: 'prod-kubernetes']) {
+                    sh "kubectl apply -f k8s/rabbitmq.yaml"
+                    sh "kubectl -n ${params.NAMESPACE} rollout status deployment/rabbitmq --timeout=180s"
+                }
+            }
+        }
+
+        stage('Ingress') {
+            when { expression { params.APPLY_INGRESS } }
+            steps {
+                script {
+                    if (!params.API_HOST?.trim()) {
+                        error 'API_HOST пуст — без домена Ingress собрать не из чего'
+                    }
+                }
+                withKubeConfig([credentialsId: 'prod-kubernetes']) {
+                    // Шаблон не правим на месте: рабочая копия переиспользуется
+                    // между сборками, и подставленный домен утёк бы в следующую.
+                    sh """
+                       sed -e 's|API_HOST|${params.API_HOST}|g' \
+                           -e 's|ingressClassName: nginx|ingressClassName: ${params.INGRESS_CLASS}|' \
+                           apps/gateway/ingress.yaml > ingress.generated.yaml
+                    """
+                    script {
+                        if (!params.CLUSTER_ISSUER?.trim()) {
+                            // Без cert-manager аннотация указывает на несуществующий
+                            // issuer: сертификат не выпустится, а Ingress останется
+                            // с пустым секретом и отдаст ошибку TLS.
+                            sh "sed -i '/cert-manager.io\\/cluster-issuer/d' ingress.generated.yaml"
+                        } else {
+                            sh "sed -i 's|cluster-issuer: letsencrypt-prod|cluster-issuer: ${params.CLUSTER_ISSUER}|' ingress.generated.yaml"
+                        }
+                    }
+                    sh 'cat ingress.generated.yaml'
+                    sh 'kubectl apply -f ingress.generated.yaml'
+                    // Адрес, на который надо направить A-запись домена.
+                    sh "kubectl get ingress -n ${params.NAMESPACE} -o wide"
+                }
+            }
+        }
+    }
+}

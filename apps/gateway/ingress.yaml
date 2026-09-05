@@ -1,0 +1,44 @@
+# Единственная точка входа снаружи: auth и notifications в интернет не смотрят,
+# к ним ходят только через очередь.
+#
+# Применяется руками, вне пайплайна: домен и сертификат живут дольше, чем
+# отдельная сборка, и пересоздавать их на каждый деплой незачем.
+#
+#   1. заменить API_HOST на купленный домен;
+#   2. kubectl apply -f apps/gateway/ingress.yaml
+#
+# API_HOST намеренно оставлен невалидным DNS-именем: kubectl отвергнет манифест,
+# и забытая подстановка обнаружится сразу, а не после первого запроса фронта.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: nest-backend-gateway
+  namespace: sprak-by-ru
+  annotations:
+    # Выпуск и автопродление сертификата Let's Encrypt. ClusterIssuer с таким
+    # именем должен существовать в кластере. Если cert-manager не установлен —
+    # убрать аннотацию и создать секрет gateway-tls руками:
+    #   kubectl -n sprak-by-ru create secret tls gateway-tls \
+    #     --cert=fullchain.pem --key=privkey.pem
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+spec:
+  # Проверить фактическое имя: `kubectl get ingressclass`. В кластерах с Traefik
+  # тут будет `traefik`, и nginx-аннотации работать не будут.
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - API_HOST
+      secretName: gateway-tls
+  rules:
+    - host: API_HOST
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                # Имя Service из apps/gateway/deployment.yaml после подстановки
+                # PROJECT. Порт 80 — внешний порт Service, не порт контейнера.
+                name: nest-backend-gateway
+                port:
+                  number: 80

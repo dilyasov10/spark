@@ -1,0 +1,39 @@
+# Auth — не HTTP-сервис: main.ts поднимает его через createMicroservice с
+# транспортом RabbitMQ. Поэтому здесь нет ни Service, ни containerPort, ни
+# HTTP-проб: снаружи по сети к нему никто не обращается, входящий трафик идёт
+# через очередь.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: DEPLOYMENT_NAME
+  namespace: NAMESPACE
+  labels:
+    app: PROJECT
+spec:
+  selector:
+    matchLabels:
+      project: PROJECT
+  template:
+    metadata:
+      labels:
+        project: PROJECT
+    spec:
+      containers:
+        - name: PROJECT
+          image: REGISTRY_HOSTNAME/PROJECT:TAG_VERSION
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            runAsUser: 1000
+          # Тот же Secret, что у gateway: сервисы делят DATABASE_URL и
+          # RABBITMQ_URL. requireEnv('RABBITMQ_URL') в main.ts падает до старта
+          # Nest, если переменной нет, — под уйдёт в CrashLoopBackOff.
+          envFrom:
+            - secretRef:
+                name: nest-backend-secrets
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              memory: 512Mi

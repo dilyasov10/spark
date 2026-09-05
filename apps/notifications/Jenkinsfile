@@ -1,0 +1,135 @@
+def app
+
+/**
+ * Едет ли из этой сборки деплой. Логика и причины — те же, что в
+ * apps/gateway/Jenkinsfile: джоба работает на ghprb, а `when { branch 'main' }`
+ * смотрит в BRANCH_NAME, которую выставляет только Multibranch Pipeline.
+ */
+def isDeployBuild() {
+    if (env.ghprbTargetBranch) {
+        return env.ghprbTargetBranch == 'main'
+    }
+
+    return env.BRANCH_NAME == 'main' || (env.GIT_BRANCH ?: '') ==~ /(origin\/)?main/
+}
+
+pipeline {
+    agent any
+    environment {
+        ENV_TYPE = "production"
+        NAMESPACE = "sprak-by-ru"
+        REGISTRY_HOSTNAME = "alhmdd2405"
+        PROJECT = "nest-backend-notifications"
+        SERVICE = "notifications"
+        REGISTRY = "registry.hub.docker.com"
+        DEPLOYMENT_NAME = "nest-backend-notifications-deployment"
+        IMAGE_NAME = "${env.BUILD_ID}_${env.ENV_TYPE}_${env.GIT_COMMIT}"
+        DOCKER_BUILD_NAME = "${env.REGISTRY_HOSTNAME}/${env.PROJECT}:${env.IMAGE_NAME}"
+        // PORT здесь нет намеренно: notifications поднимается через
+        // createMicroservice с транспортом RabbitMQ и HTTP не слушает.
+        COREPACK_ENABLE_DOWNLOAD_PROMPT = "0"
+    }
+
+    stages {
+        stage('Clone repository') {
+            steps {
+                checkout scm
+                echo "ghprbTargetBranch=${env.ghprbTargetBranch} BRANCH_NAME=${env.BRANCH_NAME} GIT_BRANCH=${env.GIT_BRANCH}"
+                echo "Деплойные стадии: ${isDeployBuild() ? 'выполняются' : 'пропускаются'}"
+            }
+        }
+        stage('Install dependencies') {
+            steps {
+                script {
+                    // Клиент Prisma генерируется в libs/prisma/src/generated и в
+                    // git не коммитится — без генерации тесты падают на импорте.
+                    sh '''
+                       export NVM_DIR="$HOME/.nvm"
+                       [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
+                       nvm use --lts
+                       npm install -g corepack@latest
+                       corepack enable
+                       pnpm install --frozen-lockfile
+                       DIRECT_URL="postgresql://build:build@localhost:5432/build" pnpm db:generate
+                    '''
+                }
+            }
+        }
+        stage('Unit tests') {
+            steps {
+                script {
+                    sh '''
+                       export NVM_DIR="$HOME/.nvm"
+                       [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
+                       nvm use --lts
+                       pnpm test
+                    '''
+                }
+            }
+        }
+        stage('Build docker image') {
+            when { expression { isDeployBuild() } }
+            steps {
+                echo "Build image started..."
+                    script {
+                        // Порт не передаём — у Dockerfile для него есть значение
+                        // по умолчанию, а этот сервис его всё равно не слушает.
+                        app = docker.build(
+                            "${env.DOCKER_BUILD_NAME}",
+                            "--build-arg service=${env.SERVICE} -f Dockerfile ."
+                        )
+                    }
+                echo "Build image finished..."
+            }
+        }
+        stage('Push docker image') {
+             when { expression { isDeployBuild() } }
+             steps {
+                 script {
+                    docker.withRegistry("https://${env.REGISTRY}", 'sprak-by-ru') {
+                        app.push("${env.IMAGE_NAME}")
+                    }
+                 }
+             }
+       }
+       stage('Delete image local') {
+             when { expression { isDeployBuild() } }
+             steps {
+                 script {
+                    sh "docker rmi -f ${env.DOCKER_BUILD_NAME}"
+                 }
+             }
+        }
+        stage('Preparing deployment') {
+             when { expression { isDeployBuild() } }
+             steps {
+                 // PORT_CONTAINER в манифесте этого сервиса не встречается, но
+                 // скрипт ждёт семь аргументов — передаём заглушку.
+                 sh 'chmod +x ./preparingDeploy.sh'
+                 sh """./preparingDeploy.sh ${env.SERVICE} ${env.REGISTRY_HOSTNAME} ${env.PROJECT} ${env.IMAGE_NAME} ${env.DEPLOYMENT_NAME} 0 ${env.NAMESPACE}"""
+                 sh "cat ./apps/${env.SERVICE}/deployment.generated.yaml"
+             }
+        }
+        stage('Deploy to Kubernetes') {
+             when { expression { isDeployBuild() } }
+             steps {
+                 withKubeConfig([credentialsId: 'prod-kubernetes']) {
+                    sh "kubectl apply -f ./apps/${env.SERVICE}/deployment.generated.yaml"
+                    sh "kubectl rollout status deployment/${env.DEPLOYMENT_NAME} --namespace=${env.NAMESPACE} --timeout=180s"
+                 }
+             }
+        }
+    }
+    post {
+        failure {
+            script {
+                if (isDeployBuild()) {
+                    withKubeConfig([credentialsId: 'prod-kubernetes']) {
+                        sh "kubectl -n ${env.NAMESPACE} describe deployment/${env.DEPLOYMENT_NAME} || true"
+                        sh "kubectl -n ${env.NAMESPACE} logs -l project=${env.PROJECT} --tail=100 --all-containers || true"
+                    }
+                }
+            }
+        }
+    }
+}

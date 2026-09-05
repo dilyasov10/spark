@@ -11,16 +11,64 @@ spec:
       project: PROJECT
   template:
     metadata:
-      namespace: NAMESPACE
       labels:
         project: PROJECT
     spec:
       containers:
-         - name: PROJECT
-           image: REGISTRY_HOSTNAME/PROJECT:TAG_VERSION
-           securityContext:
-             allowPrivilegeEscalation: false
-             runAsNonRoot: true      # опционально, но хорошая практика
-             runAsUser: 1000         # опционально
-           ports:
-             - containerPort: PORT_CONTAINER
+        - name: PROJECT
+          image: REGISTRY_HOSTNAME/PROJECT:TAG_VERSION
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            runAsUser: 1000
+          # Секреты живут в объекте Secret, а не в манифесте: этот файл лежит в
+          # git. Создаётся отдельно, вне пайплайна (см. docs/deploy.md).
+          # Без DATABASE_URL приложение падает на старте — PrismaService зовёт
+          # getOrThrow; без RABBITMQ_URL — то же самое в AuthModule.
+          envFrom:
+            - secretRef:
+                name: nest-backend-secrets
+          env:
+            - name: PORT
+              value: "PORT_CONTAINER"
+          ports:
+            - containerPort: PORT_CONTAINER
+          # `GET /api` — самый дешёвый живой роут: AppController отдаёт строку,
+          # ни в базу, ни в брокер не ходит. Спека Swagger (`/api/docs-json`)
+          # для пробы тяжелее и собирается на каждый запрос.
+          #
+          # Пока readiness не пройдёт, Service не пустит на под трафик. Это и
+          # закрывает окно, в котором Nest ещё поднимается, а запросы уже идут.
+          readinessProbe:
+            httpGet:
+              path: /api
+              port: PORT_CONTAINER
+            initialDelaySeconds: 10
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /api
+              port: PORT_CONTAINER
+            initialDelaySeconds: 30
+            periodSeconds: 15
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              memory: 512Mi
+---
+# Точка входа для Ingress. Снаружи Service слушает 80, внутрь ходит на порт
+# контейнера: порт приложения может смениться, а адрес Service, на который
+# ссылается ingress.yaml, должен оставаться стабильным.
+apiVersion: v1
+kind: Service
+metadata:
+  name: PROJECT
+  namespace: NAMESPACE
+spec:
+  selector:
+    project: PROJECT
+  ports:
+    - port: 80
+      targetPort: PORT_CONTAINER

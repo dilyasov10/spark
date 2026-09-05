@@ -1,4 +1,33 @@
 def app
+
+/**
+ * Едет ли из этой сборки деплой.
+ *
+ * Проверка `when { branch 'main' }` смотрит в BRANCH_NAME, а её выставляет
+ * только Multibranch Pipeline — в остальных типах джоб переменная пуста,
+ * условие ложно всегда, и деплойные стадии пропускались даже на зелёном
+ * прогоне.
+ *
+ * Джоба `prd-nest-backend-gateway-pull-request` работает на плагине ghprb: она
+ * собирает merge-ref пул-реквеста (`origin/pr/N/merge`), то есть содержимое main
+ * плюс коммиты PR. Поэтому решение принимаем по ветке, в которую нацелен PR:
+ * `ghprbTargetBranch`.
+ *
+ * Следствие, про которое надо помнить: деплоится любой PR в main, включая
+ * чужой и ещё не отревьюренный. Для тестового контура это осознанный размен —
+ * фронту нужен свежий бэкенд без ожидания мержа.
+ *
+ * BRANCH_NAME и GIT_BRANCH проверяются следом — чтобы пайплайн отработал без
+ * правок, если джоба на main всё-таки появится.
+ */
+def isDeployBuild() {
+    if (env.ghprbTargetBranch) {
+        return env.ghprbTargetBranch == 'main'
+    }
+
+    return env.BRANCH_NAME == 'main' || (env.GIT_BRANCH ?: '') ==~ /(origin\/)?main/
+}
+
 pipeline {
     agent any
     environment {
@@ -7,17 +36,45 @@ pipeline {
         NAMESPACE = "sprak-by-ru"
         REGISTRY_HOSTNAME = "alhmdd2405"
         PROJECT = "nest-backend-gateway"
-        SERVICE="gateway"
+        SERVICE = "gateway"
         REGISTRY = "registry.hub.docker.com"
         DEPLOYMENT_NAME = "nest-backend-gateway-deployment"
         IMAGE_NAME = "${env.BUILD_ID}_${env.ENV_TYPE}_${env.GIT_COMMIT}"
         DOCKER_BUILD_NAME = "${env.REGISTRY_HOSTNAME}/${env.PROJECT}:${env.IMAGE_NAME}"
+        // corepack из образа агента может быть старше ключей, которыми подписаны
+        // свежие релизы pnpm; переменная гасит его интерактивный вопрос, иначе
+        // сборка зависнет на приглашении.
+        COREPACK_ENABLE_DOWNLOAD_PROMPT = "0"
     }
 
     stages {
         stage('Clone repository') {
             steps {
                 checkout scm
+                // Пропуск деплойных стадий выглядит в Stage View одинаково при
+                // любой причине — печатаем решение и его входные данные, чтобы
+                // не разбирать это по логу заново.
+                echo "ghprbTargetBranch=${env.ghprbTargetBranch} BRANCH_NAME=${env.BRANCH_NAME} GIT_BRANCH=${env.GIT_BRANCH}"
+                echo "Деплойные стадии: ${isDeployBuild() ? 'выполняются' : 'пропускаются'}"
+            }
+        }
+        stage('Install dependencies') {
+            steps {
+                script {
+                    // Клиент Prisma генерируется в libs/prisma/src/generated и в
+                    // git не коммитится — без генерации тесты падают на импорте.
+                    // `prisma generate` в базу не ходит, URL нужен ему только
+                    // формально.
+                    sh '''
+                       export NVM_DIR="$HOME/.nvm"
+                       [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
+                       nvm use --lts
+                       npm install -g corepack@latest
+                       corepack enable
+                       pnpm install --frozen-lockfile
+                       DIRECT_URL="postgresql://build:build@localhost:5432/build" pnpm db:generate
+                    '''
+                }
             }
         }
         stage('Unit tests') {
@@ -27,34 +84,46 @@ pipeline {
                        export NVM_DIR="$HOME/.nvm"
                        [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
                        nvm use --lts
-                       yarn install
-                       yarn test
+                       pnpm test
                     '''
                 }
             }
         }
         stage('e2e tests') {
+            // Переменные окружения стадии не нужны: ни один e2e-тест в базу не
+            // ходит, PrismaService везде подменяется заглушкой. Здесь стоял
+            // credential 'neon-database-url', но биндинг вычисляется до тела
+            // стадии — при отсутствии credential в Jenkins сборка обрывалась с
+            // `ERROR: neon-database-url`, не запустив ни одной команды.
             steps {
                 script {
                     sh '''
                        export NVM_DIR="$HOME/.nvm"
                        [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
                        nvm use --lts
-                       yarn test:e2e
+                       pnpm test:e2e
                     '''
                 }
             }
         }
         stage('Build docker image') {
+            when { expression { isDeployBuild() } }
             steps {
                 echo "Build image started..."
                     script {
-                       app = docker.build("${env.DOCKER_BUILD_NAME}", "--build-arg service=${env.SERVICE} --build-arg port=${env.PORT} -f ./apps/${env.SERVICE}/Dockerfile ./")
+                        // Dockerfile один на все сервисы и лежит в корне; какой
+                        // именно собрать — решает build-arg. Контекст — корень
+                        // репозитория: сборке нужны и libs, и pnpm-lock.yaml.
+                        app = docker.build(
+                            "${env.DOCKER_BUILD_NAME}",
+                            "--build-arg service=${env.SERVICE} --build-arg port=${env.PORT} -f Dockerfile ."
+                        )
                     }
                 echo "Build image finished..."
             }
         }
         stage('Push docker image') {
+             when { expression { isDeployBuild() } }
              steps {
                  echo "Push image started..."
                      script {
@@ -66,6 +135,7 @@ pipeline {
              }
        }
        stage('Delete image local') {
+             when { expression { isDeployBuild() } }
              steps {
                  script {
                     sh "docker rmi -f ${env.DOCKER_BUILD_NAME}"
@@ -73,23 +143,36 @@ pipeline {
              }
         }
         stage('Preparing deployment') {
+             when { expression { isDeployBuild() } }
              steps {
                  echo "Preparing started..."
-                     sh 'ls -ltr'
-                     sh 'pwd'
-                     sh "chmod +x ./apps/${env.SERVICE}/preparingDeploy.sh"
-                     sh "./apps/${env.SERVICE}/preparingDeploy.sh ${env.REGISTRY_HOSTNAME} ${env.PROJECT} ${env.IMAGE_NAME} ${env.DEPLOYMENT_NAME} ${env.PORT} ${env.NAMESPACE}"
-                     sh "cat ./apps/${env.SERVICE}/deployment.yaml"
+                     sh 'chmod +x ./preparingDeploy.sh'
+                     sh """./preparingDeploy.sh ${env.SERVICE} ${env.REGISTRY_HOSTNAME} ${env.PROJECT} ${env.IMAGE_NAME} ${env.DEPLOYMENT_NAME} ${env.PORT} ${env.NAMESPACE}"""
+                     sh "cat ./apps/${env.SERVICE}/deployment.generated.yaml"
              }
         }
         stage('Deploy to Kubernetes') {
+             when { expression { isDeployBuild() } }
              steps {
                  withKubeConfig([credentialsId: 'prod-kubernetes']) {
-                    sh "kubectl apply -f ./apps/${env.SERVICE}/deployment.yaml"
-                    sh "kubectl rollout status deployment/${env.DEPLOYMENT_NAME} --namespace=${env.NAMESPACE}"
-                    sh "kubectl get services -o wide"
+                    sh "kubectl apply -f ./apps/${env.SERVICE}/deployment.generated.yaml"
+                    sh "kubectl rollout status deployment/${env.DEPLOYMENT_NAME} --namespace=${env.NAMESPACE} --timeout=180s"
                  }
              }
+        }
+    }
+    post {
+        // rollout status по таймауту говорит только «не уложился». Причина —
+        // в событиях и логах пода, а их после сборки уже не достать.
+        failure {
+            script {
+                if (isDeployBuild()) {
+                    withKubeConfig([credentialsId: 'prod-kubernetes']) {
+                        sh "kubectl -n ${env.NAMESPACE} describe deployment/${env.DEPLOYMENT_NAME} || true"
+                        sh "kubectl -n ${env.NAMESPACE} logs -l project=${env.PROJECT} --tail=100 --all-containers || true"
+                    }
+                }
+            }
         }
     }
 }

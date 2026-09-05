@@ -1,0 +1,80 @@
+# Брокер, через который gateway разговаривает с auth и notifications.
+# Применяется один раз, руками, вне пайплайна: это инфраструктура окружения, а
+# не артефакт сборки, и пересоздавать её на каждый деплой незачем.
+#
+#   kubectl apply -f k8s/rabbitmq.yaml
+#
+# Хранилища намеренно нет: под тестовый контур сообщения переживать рестарт не
+# обязаны, а PVC тянет за собой StorageClass, которого в кластере может не
+# оказаться. Для прода — заменить на StatefulSet с volumeClaimTemplates.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: rabbitmq
+  namespace: sprak-by-ru
+  labels:
+    app: rabbitmq
+spec:
+  selector:
+    matchLabels:
+      app: rabbitmq
+  template:
+    metadata:
+      labels:
+        app: rabbitmq
+    spec:
+      containers:
+        - name: rabbitmq
+          image: rabbitmq:4-management-alpine
+          env:
+            # Логин и пароль берутся из того же Secret, что и остальные доступы,
+            # — иначе они разъедутся с RABBITMQ_URL, который читают сервисы.
+            - name: RABBITMQ_DEFAULT_USER
+              valueFrom:
+                secretKeyRef:
+                  name: nest-backend-secrets
+                  key: RABBITMQ_USER
+            - name: RABBITMQ_DEFAULT_PASS
+              valueFrom:
+                secretKeyRef:
+                  name: nest-backend-secrets
+                  key: RABBITMQ_PASSWORD
+          ports:
+            - name: amqp
+              containerPort: 5672
+            - name: management
+              containerPort: 15672
+          # Проба именно диагностическая, а не TCP: порт 5672 открывается раньше,
+          # чем брокер готов принимать publish, и сервисы успевают удариться в
+          # него на старте.
+          readinessProbe:
+            exec:
+              command: ["rabbitmq-diagnostics", "-q", "check_port_connectivity"]
+            initialDelaySeconds: 20
+            periodSeconds: 10
+            timeoutSeconds: 10
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              memory: 768Mi
+---
+# Стабильное имя внутри кластера: RABBITMQ_URL в Secret указывает сюда как
+# amqp://<user>:<pass>@rabbitmq.sprak-by-ru.svc.cluster.local:5672
+# Наружу брокер не публикуется — Ingress на него не заводим сознательно.
+apiVersion: v1
+kind: Service
+metadata:
+  name: rabbitmq
+  namespace: sprak-by-ru
+spec:
+  selector:
+    app: rabbitmq
+  ports:
+    - name: amqp
+      port: 5672
+      targetPort: amqp
+    - name: management
+      port: 15672
+      targetPort: management
