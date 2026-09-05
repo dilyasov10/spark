@@ -31,5 +31,9 @@ coverage
 # Generated Prisma Client
 /libs/prisma/src/generated
 
+# Манифесты с подставленными параметрами сборки (preparingDeploy.sh).
+# В них зашит тег конкретного образа — версионировать нечего.
+*.generated.yaml
+
 # Agent instructions
 CLAUDE.md
