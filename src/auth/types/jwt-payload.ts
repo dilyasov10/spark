@@ -21,6 +21,22 @@ export interface JwtPayload {
 }
 
 /**
+ * Refresh JWT. `deviceId` связывает cookie с строкой `Session`
+ * (`@@unique([userId, deviceId])`). Access-токен это поле не несёт.
+ */
+export interface RefreshJwtPayload extends JwtPayload {
+  deviceId: string;
+  /** Уникален на каждую выдачу, чтобы ротация в ту же секунду не повторила JWT. */
+  jti?: string;
+}
+
+/** IP и User-Agent с запроса — пишем в Session при login / refresh / OAuth. */
+export interface SessionContext {
+  ip: string;
+  deviceName: string;
+}
+
+/**
  * Пользователь, которого стратегия кладёт в `request.user`. Собирается
  * `select`-ом без `passwordHash`: хеш не должен покидать сервис ни при каких
  * условиях.

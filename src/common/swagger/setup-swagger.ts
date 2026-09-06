@@ -23,6 +23,7 @@ export function setupSwagger(app: INestApplication): void {
     )
     .setVersion('1.0')
     .addBearerAuth()
+    .addCookieAuth('refreshToken')
     .build();
 
   const document = SwaggerModule.createDocument(app, config, {

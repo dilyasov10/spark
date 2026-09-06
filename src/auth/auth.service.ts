@@ -4,12 +4,15 @@ import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
 import { randomUUID } from 'node:crypto';
 import { AppException } from '../common/errors/app.exception';
+import { ERROR_CODE, errorMessageByStatus } from '../common/errors/error-code';
 import { EmailService } from './mailler/email.service';
 import { PrismaService } from '../prisma/prisma.service';
 import {
   BCRYPT_ROUNDS,
   EMAIL_CONFIRMATION_TTL_MS,
   PASSWORD_RECOVERY_TTL_MS,
+  REFRESH_TOKEN_COOKIE_MAX_AGE_MS,
+  hashRefreshToken,
 } from './auth.constants';
 import { AUTH_ERROR_CODE, AUTH_ERROR_MESSAGE } from './auth.error-code';
 import { LoginDto } from './dto/login.dto';
@@ -23,6 +26,8 @@ import type {
   AuthenticatedUser,
   JwtExpiresIn,
   JwtPayload,
+  RefreshJwtPayload,
+  SessionContext,
   TokenPair,
 } from './types/jwt-payload';
 
@@ -65,7 +70,7 @@ export class AuthService {
    * @throws AppException `INVALID_CREDENTIALS` со статусом 401
    * @throws AppException `EMAIL_NOT_CONFIRMED` со статусом 401
    */
-  async login(dto: LoginDto): Promise<TokenPair> {
+  async login(dto: LoginDto, context: SessionContext): Promise<TokenPair> {
     const user = await this.prisma.user.findUnique({
       where: { email: dto.email },
     });
@@ -100,7 +105,7 @@ export class AuthService {
       });
     }
 
-    return this.issueTokens({ sub: user.id, email: user.email });
+    return this.issueSessionTokens({ id: user.id, email: user.email }, context);
   }
 
   /**
@@ -373,13 +378,183 @@ export class AuthService {
   }
 
   /**
-   * Access подписывается дефолтным секретом модуля, refresh — своим:
-   * с общим секретом access-токен структурно годился бы как refresh.
+   * Общая выдача JWT + запись Session. Login и будущий `loginWithOAuth`
+   * должны звать только этот метод — иначе OAuth не попадёт в список девайсов.
    */
-  private async issueTokens(payload: JwtPayload): Promise<TokenPair> {
+  async issueSessionTokens(
+    user: { id: string; email: string },
+    context: SessionContext,
+  ): Promise<TokenPair> {
+    const deviceId = randomUUID();
+    const tokens = await this.signTokenPair({
+      sub: user.id,
+      email: user.email,
+      deviceId,
+    });
+
+    const now = new Date();
+    await this.prisma.session.create({
+      data: {
+        userId: user.id,
+        deviceId,
+        ip: context.ip,
+        deviceName: context.deviceName,
+        refreshTokenHash: hashRefreshToken(tokens.refreshToken),
+        lastActiveDate: now,
+        expiresAt: new Date(now.getTime() + REFRESH_TOKEN_COOKIE_MAX_AGE_MS),
+      },
+    });
+
+    return tokens;
+  }
+
+  async refreshSession(
+    refreshToken: string,
+    context: SessionContext,
+  ): Promise<TokenPair> {
+    const payload = await this.verifyRefresh(refreshToken);
+    await this.requireMatchingSession(payload, refreshToken);
+
+    const tokens = await this.signTokenPair(payload);
+    const now = new Date();
+
+    await this.prisma.session.update({
+      where: {
+        userId_deviceId: {
+          userId: payload.sub,
+          deviceId: payload.deviceId,
+        },
+      },
+      data: {
+        refreshTokenHash: hashRefreshToken(tokens.refreshToken),
+        lastActiveDate: now,
+        ip: context.ip,
+        deviceName: context.deviceName,
+        expiresAt: new Date(now.getTime() + REFRESH_TOKEN_COOKIE_MAX_AGE_MS),
+      },
+    });
+
+    return tokens;
+  }
+
+  /**
+   * Гасит сессию текущего девайса, если cookie валидна. Битый или пустой
+   * токен не ошибка: выход идемпотентен.
+   */
+  async logoutByRefresh(refreshToken: string | undefined): Promise<void> {
+    if (!refreshToken) {
+      return;
+    }
+
+    try {
+      const payload = await this.verifyRefresh(refreshToken);
+      const session = await this.prisma.session.findUnique({
+        where: {
+          userId_deviceId: {
+            userId: payload.sub,
+            deviceId: payload.deviceId,
+          },
+        },
+      });
+
+      if (
+        session &&
+        session.refreshTokenHash === hashRefreshToken(refreshToken)
+      ) {
+        await this.prisma.session.delete({ where: { id: session.id } });
+      }
+    } catch {
+      return;
+    }
+  }
+
+  async listSessions(userId: string): Promise<
+    Array<{
+      deviceId: string;
+      ip: string;
+      deviceName: string;
+      lastActiveDate: Date;
+    }>
+  > {
+    return this.prisma.session.findMany({
+      where: {
+        userId,
+        expiresAt: { gt: new Date() },
+      },
+      select: {
+        deviceId: true,
+        ip: true,
+        deviceName: true,
+        lastActiveDate: true,
+      },
+      orderBy: { lastActiveDate: 'desc' },
+    });
+  }
+
+  async terminateSession(userId: string, deviceId: string): Promise<void> {
+    const session = await this.prisma.session.findFirst({
+      where: { deviceId },
+    });
+
+    if (!session) {
+      throw new AppException({
+        code: ERROR_CODE.NOT_FOUND,
+        message: errorMessageByStatus(HttpStatus.NOT_FOUND),
+        status: HttpStatus.NOT_FOUND,
+      });
+    }
+
+    if (session.userId !== userId) {
+      throw new AppException({
+        code: ERROR_CODE.FORBIDDEN,
+        message: errorMessageByStatus(HttpStatus.FORBIDDEN),
+        status: HttpStatus.FORBIDDEN,
+      });
+    }
+
+    await this.prisma.session.delete({ where: { id: session.id } });
+  }
+
+  async terminateOtherSessions(
+    userId: string,
+    refreshToken: string | undefined,
+  ): Promise<void> {
+    if (!refreshToken) {
+      throw this.unauthorized();
+    }
+
+    const payload = await this.verifyRefresh(refreshToken);
+    if (payload.sub !== userId) {
+      throw this.unauthorized();
+    }
+
+    await this.requireMatchingSession(payload, refreshToken);
+    await this.prisma.session.deleteMany({
+      where: {
+        userId,
+        deviceId: { not: payload.deviceId },
+      },
+    });
+  }
+
+  private async signTokenPair(payload: RefreshJwtPayload): Promise<TokenPair> {
+    const accessPayload: JwtPayload = {
+      sub: payload.sub,
+      email: payload.email,
+    };
+    // Только свои claim: verifyAsync возвращает ещё iat/exp, а jsonwebtoken
+    // не даёт подписать payload с `exp` вместе с options.expiresIn.
+    const refreshPayload: RefreshJwtPayload = {
+      sub: payload.sub,
+      email: payload.email,
+      deviceId: payload.deviceId,
+      // Иначе два refresh в одну секунду с тем же deviceId — один и тот же JWT.
+      jti: randomUUID(),
+    };
+
     const [accessToken, refreshToken] = await Promise.all([
-      this.jwtService.signAsync(payload),
-      this.jwtService.signAsync(payload, {
+      this.jwtService.signAsync(accessPayload),
+      this.jwtService.signAsync(refreshPayload, {
         secret: this.configService.getOrThrow<string>('JWT_REFRESH_SECRET'),
         expiresIn: this.configService.getOrThrow<JwtExpiresIn>(
           'JWT_REFRESH_EXPIRES_IN',
@@ -388,6 +563,65 @@ export class AuthService {
     ]);
 
     return { accessToken, refreshToken };
+  }
+
+  private async verifyRefresh(token: string): Promise<RefreshJwtPayload> {
+    let payload: RefreshJwtPayload;
+
+    try {
+      payload = await this.jwtService.verifyAsync<RefreshJwtPayload>(token, {
+        secret: this.configService.getOrThrow<string>('JWT_REFRESH_SECRET'),
+      });
+    } catch (error) {
+      const isExpired =
+        error instanceof Error && error.name === 'TokenExpiredError';
+
+      throw new AppException({
+        code: isExpired
+          ? AUTH_ERROR_CODE.TOKEN_EXPIRED
+          : ERROR_CODE.UNAUTHORIZED,
+        message: isExpired
+          ? AUTH_ERROR_MESSAGE.TOKEN_EXPIRED
+          : errorMessageByStatus(HttpStatus.UNAUTHORIZED),
+        status: HttpStatus.UNAUTHORIZED,
+      });
+    }
+
+    if (!payload.sub || !payload.email || !payload.deviceId) {
+      throw this.unauthorized();
+    }
+
+    return payload;
+  }
+
+  private async requireMatchingSession(
+    payload: RefreshJwtPayload,
+    refreshToken: string,
+  ): Promise<void> {
+    const session = await this.prisma.session.findUnique({
+      where: {
+        userId_deviceId: {
+          userId: payload.sub,
+          deviceId: payload.deviceId,
+        },
+      },
+    });
+
+    if (
+      !session ||
+      session.expiresAt.getTime() < Date.now() ||
+      session.refreshTokenHash !== hashRefreshToken(refreshToken)
+    ) {
+      throw this.unauthorized();
+    }
+  }
+
+  private unauthorized(): AppException {
+    return new AppException({
+      code: ERROR_CODE.UNAUTHORIZED,
+      message: errorMessageByStatus(HttpStatus.UNAUTHORIZED),
+      status: HttpStatus.UNAUTHORIZED,
+    });
   }
 
   private async sendConfirmationEmail(

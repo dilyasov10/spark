@@ -5,23 +5,29 @@ import {
   HttpCode,
   HttpStatus,
   Post,
+  Req,
   Res,
   UseGuards,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
   ApiBearerAuth,
+  ApiCookieAuth,
   ApiOkResponse,
   ApiOperation,
   ApiResponse,
   ApiTags,
 } from '@nestjs/swagger';
-import type { Response } from 'express';
+import type { Request, Response } from 'express';
+import { AppException } from '../common/errors/app.exception';
+import { ERROR_CODE, errorMessageByStatus } from '../common/errors/error-code';
 import { ApiErrorResponses } from '../common/swagger/api-error-responses.decorator';
 import {
   REFRESH_TOKEN_COOKIE,
   clearRefreshCookieOptions,
+  readRefreshCookie,
   refreshCookieOptions,
+  sessionContextFromRequest,
 } from './auth.constants';
 import { AuthService } from './auth.service';
 import { CurrentUser } from './decorators/current-user.decorator';
@@ -133,11 +139,15 @@ export class AuthController {
   @ApiErrorResponses(HttpStatus.BAD_REQUEST, HttpStatus.UNAUTHORIZED)
   async login(
     @Body() dto: LoginDto,
+    @Req() request: Request,
     // `passthrough` обязателен: без него Nest перестаёт сериализовать
     // возвращаемое значение и запрос повисает.
     @Res({ passthrough: true }) response: Response,
   ): Promise<LoginResponseDto> {
-    const { accessToken, refreshToken } = await this.authService.login(dto);
+    const { accessToken, refreshToken } = await this.authService.login(
+      dto,
+      sessionContextFromRequest(request),
+    );
 
     response.cookie(
       REFRESH_TOKEN_COOKIE,
@@ -148,23 +158,60 @@ export class AuthController {
     return { accessToken };
   }
 
+  @Post('refresh-token')
+  @HttpCode(HttpStatus.OK)
+  @ApiCookieAuth(REFRESH_TOKEN_COOKIE)
+  @ApiOperation({
+    summary: 'Обновление пары токенов',
+    description:
+      'Читает refresh из httpOnly-cookie, сверяет хеш с Session, ротирует ' +
+      'refresh и отдаёт новый accessToken в теле.',
+  })
+  @ApiOkResponse({ type: LoginResponseDto, description: 'Токены обновлены' })
+  @ApiErrorResponses(HttpStatus.UNAUTHORIZED)
+  async refreshToken(
+    @Req() request: Request,
+    @Res({ passthrough: true }) response: Response,
+  ): Promise<LoginResponseDto> {
+    const refreshToken = readRefreshCookie(request);
+    if (!refreshToken) {
+      throw new AppException({
+        code: ERROR_CODE.UNAUTHORIZED,
+        message: errorMessageByStatus(HttpStatus.UNAUTHORIZED),
+        status: HttpStatus.UNAUTHORIZED,
+      });
+    }
+
+    const tokens = await this.authService.refreshSession(
+      refreshToken,
+      sessionContextFromRequest(request),
+    );
+
+    response.cookie(
+      REFRESH_TOKEN_COOKIE,
+      tokens.refreshToken,
+      refreshCookieOptions(this.isProduction),
+    );
+
+    return { accessToken: tokens.accessToken };
+  }
+
   @Post('logout')
   @HttpCode(HttpStatus.OK)
+  @ApiCookieAuth(REFRESH_TOKEN_COOKIE)
   @ApiOperation({
     summary: 'Выход из аккаунта',
     description:
-      'Гасит cookie с refresh-токеном. Токена в заголовке не требует и всегда ' +
-      'отвечает 200 — выйти нужно уметь и тогда, когда access-токен уже ' +
-      'протух. Сам access-токен остаётся валидным до конца своего срока: ' +
-      'сервер его не отзывает, фронтенду нужно стереть токен у себя.',
+      'Удаляет Session текущего девайса (если refresh-cookie валидна) и гасит ' +
+      'cookie. Access-токен в заголовке не нужен: выйти можно и с протухшим ' +
+      'access. Сам access остаётся валидным до своего TTL — фронт стирает его у себя.',
   })
   @ApiOkResponse({ type: LogoutResponseDto, description: 'Выход выполнен' })
-  logout(@Res({ passthrough: true }) response: Response): LogoutResponseDto {
-    // Без `JwtAuthGuard` намеренно. Отзывать на сервере нечего — refresh-токен
-    // нигде не хранится, — так что гарда добавила бы только 401 на протухшем
-    // токене: пользователь остался бы с живой cookie и без способа её погасить.
-    // Худшее, что даёт открытый эндпоинт, — чужой сайт может разлогинить
-    // пользователя; данных это не раскрывает и прав не даёт.
+  async logout(
+    @Req() request: Request,
+    @Res({ passthrough: true }) response: Response,
+  ): Promise<LogoutResponseDto> {
+    await this.authService.logoutByRefresh(readRefreshCookie(request));
     response.clearCookie(
       REFRESH_TOKEN_COOKIE,
       clearRefreshCookieOptions(this.isProduction),
