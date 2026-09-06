@@ -1,5 +1,7 @@
-import type { CookieOptions } from 'express';
+import type { CookieOptions, Request } from 'express';
+import { createHash } from 'node:crypto';
 import { API_PREFIX } from '../common/bootstrap/setup-app';
+import type { SessionContext } from './types/jwt-payload';
 
 /**
  * Та же стоимость, что у сида (`prisma/seed/index.ts`), — иначе сид-аккаунты
@@ -17,13 +19,36 @@ export const PASSWORD_RECOVERY_TTL_MS = 60 * 60 * 1000;
 export const REFRESH_TOKEN_COOKIE = 'refreshToken';
 
 /**
- * Cookie видна только auth-роутам: остальные эндпоинты refresh-токен не читают,
- * и слать его им незачем. Путь обязан учитывать глобальный префикс — cookie,
- * выданную на `/auth`, браузер на `/api/auth/...` уже не пришлёт.
+ * Path `/api`, не `/api/auth`: refresh читают и auth (`logout`, `refresh-token`),
+ * и `/api/security/devices`. Cookie только на `/api/auth` браузер на security
+ * не отправит. Учитываем глобальный префикс.
  */
-export const REFRESH_TOKEN_COOKIE_PATH = `/${API_PREFIX}/auth`;
+export const REFRESH_TOKEN_COOKIE_PATH = `/${API_PREFIX}`;
 
-const REFRESH_TOKEN_COOKIE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+export const REFRESH_TOKEN_COOKIE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+
+const DEVICE_NAME_MAX_LENGTH = 512;
+
+/** SHA-256 refresh JWT. Сырой токен в `Session` не храним. */
+export function hashRefreshToken(token: string): string {
+  return createHash('sha256').update(token).digest('hex');
+}
+
+export function readRefreshCookie(request: Request): string | undefined {
+  const value = request.cookies?.[REFRESH_TOKEN_COOKIE] as string | undefined;
+  return typeof value === 'string' && value.length > 0 ? value : undefined;
+}
+
+export function sessionContextFromRequest(request: Request): SessionContext {
+  const ip = request.ip?.trim() || 'unknown';
+  const userAgent = request.headers['user-agent'];
+  const deviceName =
+    typeof userAgent === 'string' && userAgent.trim().length > 0
+      ? userAgent.trim().slice(0, DEVICE_NAME_MAX_LENGTH)
+      : 'unknown';
+
+  return { ip, deviceName };
+}
 
 /**
  * Атрибуты, по которым браузер отличает одну cookie от другой. Вынесены

@@ -47,6 +47,15 @@ function refreshCookieHeader(response: request.Response): string {
   return cookie;
 }
 
+function refreshCookieValue(response: request.Response): string {
+  const header = refreshCookieHeader(response);
+  return header.slice(`${REFRESH_TOKEN_COOKIE}=`.length).split(';')[0];
+}
+
+function cookieHeader(response: request.Response): string {
+  return `${REFRESH_TOKEN_COOKIE}=${refreshCookieValue(response)}`;
+}
+
 /**
  * Атрибуты, по которым браузер решает, та же это cookie или другая. Срок
  * жизни в них не входит — им выдача и гашение как раз и отличаются.
@@ -82,11 +91,79 @@ describe('Авторизация (e2e)', () => {
       return Promise.resolve(args.where.id === USER.id ? USER : null);
     });
 
+    type SessionRow = {
+      id: string;
+      userId: string;
+      deviceId: string;
+      refreshTokenHash: string;
+      expiresAt: Date;
+      ip: string;
+      deviceName: string;
+      lastActiveDate: Date;
+    };
+
+    const sessions = new Map<string, SessionRow>();
+    const sessionKey = (userId: string, deviceId: string): string =>
+      `${userId}:${deviceId}`;
+
     const moduleFixture = await Test.createTestingModule({
       imports: [AppModule],
     })
       .overrideProvider(PrismaService)
-      .useValue({ user: { findUnique } })
+      .useValue({
+        user: { findUnique },
+        session: {
+          create: jest.fn(({ data }: { data: SessionRow }) => {
+            const row = { ...data, id: data.deviceId };
+            sessions.set(sessionKey(data.userId, data.deviceId), row);
+            return Promise.resolve(row);
+          }),
+          findUnique: jest.fn(
+            ({
+              where,
+            }: {
+              where: { userId_deviceId: { userId: string; deviceId: string } };
+            }) => {
+              const { userId, deviceId } = where.userId_deviceId;
+              return Promise.resolve(
+                sessions.get(sessionKey(userId, deviceId)) ?? null,
+              );
+            },
+          ),
+          update: jest.fn(
+            ({
+              where,
+              data,
+            }: {
+              where: { userId_deviceId: { userId: string; deviceId: string } };
+              data: Partial<SessionRow>;
+            }) => {
+              const key = sessionKey(
+                where.userId_deviceId.userId,
+                where.userId_deviceId.deviceId,
+              );
+              const prev = sessions.get(key);
+              if (!prev) {
+                return Promise.resolve(null);
+              }
+              const next = { ...prev, ...data };
+              sessions.set(key, next);
+              return Promise.resolve(next);
+            },
+          ),
+          delete: jest.fn(({ where }: { where: { id: string } }) => {
+            for (const [key, row] of sessions) {
+              if (row.id === where.id) {
+                sessions.delete(key);
+              }
+            }
+            return Promise.resolve({});
+          }),
+          deleteMany: jest.fn(),
+          findMany: jest.fn().mockResolvedValue([]),
+          findFirst: jest.fn().mockResolvedValue(null),
+        },
+      })
       .compile();
 
     app = moduleFixture.createNestApplication();
@@ -138,7 +215,7 @@ describe('Авторизация (e2e)', () => {
 
       expect(refreshCookie).toBeDefined();
       expect(refreshCookie).toContain('HttpOnly');
-      expect(refreshCookie).toContain('Path=/api/auth');
+      expect(refreshCookie).toContain('Path=/api');
       expect(Object.keys(response.body as object)).toEqual(['accessToken']);
     });
 
@@ -217,6 +294,41 @@ describe('Авторизация (e2e)', () => {
     });
   });
 
+  describe('POST /api/auth/refresh-token', () => {
+    it('отдаёт новый accessToken и ротирует refresh-cookie', async () => {
+      // Arrange
+      const loginResponse = await request(app.getHttpServer())
+        .post('/api/auth/login')
+        .send({ email: USER.email, password: PASSWORD })
+        .expect(HttpStatus.OK);
+
+      // Act
+      const response = await request(app.getHttpServer())
+        .post('/api/auth/refresh-token')
+        .set('Cookie', cookieHeader(loginResponse))
+        .expect(HttpStatus.OK);
+
+      // Assert
+      expect((response.body as { accessToken: string }).accessToken).toEqual(
+        expect.any(String),
+      );
+      expect(refreshCookieValue(response)).not.toBe(
+        refreshCookieValue(loginResponse),
+      );
+    });
+
+    it('отвечает 401 без refresh-cookie', async () => {
+      // Arrange
+      // Act
+      const response = await request(app.getHttpServer())
+        .post('/api/auth/refresh-token')
+        .expect(HttpStatus.UNAUTHORIZED);
+
+      // Assert
+      expect((response.body as ApiErrorDto).code).toBe(ERROR_CODE.UNAUTHORIZED);
+    });
+  });
+
   describe('POST /api/auth/logout', () => {
     it('отвечает 200, а не 201, и подтверждает выход', async () => {
       // Arrange
@@ -261,6 +373,26 @@ describe('Авторизация (e2e)', () => {
       expect(cookieIdentity(refreshCookieHeader(logoutResponse))).toEqual(
         cookieIdentity(refreshCookieHeader(loginResponse)),
       );
+    });
+
+    it('удаляет Session, если refresh-cookie валидна', async () => {
+      // Arrange
+      const loginResponse = await request(app.getHttpServer())
+        .post('/api/auth/login')
+        .send({ email: USER.email, password: PASSWORD })
+        .expect(HttpStatus.OK);
+
+      // Act
+      await request(app.getHttpServer())
+        .post('/api/auth/logout')
+        .set('Cookie', cookieHeader(loginResponse))
+        .expect(HttpStatus.OK);
+
+      // Assert: старый refresh больше не проходит
+      await request(app.getHttpServer())
+        .post('/api/auth/refresh-token')
+        .set('Cookie', cookieHeader(loginResponse))
+        .expect(HttpStatus.UNAUTHORIZED);
     });
 
     it('не требует access-токена: выйти можно и с протухшей сессией', async () => {

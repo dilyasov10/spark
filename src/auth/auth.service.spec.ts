@@ -4,9 +4,11 @@ import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
 import { AppException } from '../common/errors/app.exception';
 import { PrismaService } from '../prisma/prisma.service';
-import { BCRYPT_ROUNDS } from './auth.constants';
+import { BCRYPT_ROUNDS, hashRefreshToken } from './auth.constants';
 import { AUTH_ERROR_CODE, AUTH_ERROR_MESSAGE } from './auth.error-code';
 import { AuthService } from './auth.service';
+import { ERROR_CODE } from '../common/errors/error-code';
+import type { SessionContext } from './types/jwt-payload';
 
 // Экспорты bcrypt не переопределяются через spyOn, поэтому оборачиваем модуль
 // целиком, сохраняя настоящую реализацию: хеши в тестах должны быть настоящими.
@@ -25,6 +27,11 @@ const VALID_PASSWORD = 'Password123!';
 const WRONG_PASSWORD = 'WrongPassword1!';
 const USER_ID = '3f8c1a94-2e7b-4d61-9c0a-5b1e2d4a7f01';
 const EMAIL = 'anna.kovaleva@gmail.com';
+const DEVICE_ID = '7a2d5e18-9c34-4b6f-8e2d-1f7a3c9b5d02';
+const SESSION_CONTEXT: SessionContext = {
+  ip: '127.0.0.1',
+  deviceName: 'jest-agent',
+};
 
 /** Возвращает ошибку, которой завершился вызов, вместо того чтобы падать. */
 async function captureError(promise: Promise<unknown>): Promise<AppException> {
@@ -48,7 +55,14 @@ describe('AuthService', () => {
   let passwordRecoveryFindUnique: jest.Mock;
   let passwordRecoveryUpsert: jest.Mock;
   let passwordRecoveryDelete: jest.Mock;
+  let sessionCreate: jest.Mock;
+  let sessionFindUnique: jest.Mock;
+  let sessionFindFirst: jest.Mock;
+  let sessionFindMany: jest.Mock;
+  let sessionUpdate: jest.Mock;
+  let sessionDelete: jest.Mock;
   let sessionDeleteMany: jest.Mock;
+  let verifyAsync: jest.Mock;
   let userUpdate: jest.Mock;
   let transaction: jest.Mock;
   let signAsync: jest.Mock;
@@ -75,10 +89,17 @@ describe('AuthService', () => {
     passwordRecoveryFindUnique = jest.fn();
     passwordRecoveryUpsert = jest.fn().mockResolvedValue(undefined);
     passwordRecoveryDelete = jest.fn().mockResolvedValue(undefined);
+    sessionCreate = jest.fn().mockResolvedValue({});
+    sessionFindUnique = jest.fn();
+    sessionFindFirst = jest.fn();
+    sessionFindMany = jest.fn().mockResolvedValue([]);
+    sessionUpdate = jest.fn().mockResolvedValue({});
+    sessionDelete = jest.fn().mockResolvedValue({});
     sessionDeleteMany = jest.fn().mockResolvedValue({ count: 0 });
     userUpdate = jest.fn().mockResolvedValue(undefined);
     transaction = jest.fn(async (ops: Promise<unknown>[]) => Promise.all(ops));
     signAsync = jest.fn().mockResolvedValue('signed-token');
+    verifyAsync = jest.fn();
     sendRegistrationConfirmation = jest.fn().mockResolvedValue(undefined);
     sendPasswordRecovery = jest.fn().mockResolvedValue(undefined);
     verifyRecaptcha = jest.fn().mockResolvedValue(undefined);
@@ -102,11 +123,17 @@ describe('AuthService', () => {
           delete: passwordRecoveryDelete,
         },
         session: {
+          create: sessionCreate,
+          findUnique: sessionFindUnique,
+          findFirst: sessionFindFirst,
+          findMany: sessionFindMany,
+          update: sessionUpdate,
+          delete: sessionDelete,
           deleteMany: sessionDeleteMany,
         },
         $transaction: transaction,
       } as unknown as PrismaService,
-      { signAsync } as unknown as JwtService,
+      { signAsync, verifyAsync } as unknown as JwtService,
       {
         getOrThrow: jest.fn((key: string) => `value-of-${key}`),
       } as unknown as ConfigService,
@@ -143,10 +170,13 @@ describe('AuthService', () => {
     findUnique.mockResolvedValue(confirmedUser());
 
     // Act
-    const tokens = await service.login({
-      email: EMAIL,
-      password: VALID_PASSWORD,
-    });
+    const tokens = await service.login(
+      {
+        email: EMAIL,
+        password: VALID_PASSWORD,
+      },
+      SESSION_CONTEXT,
+    );
 
     // Assert
     expect(tokens).toEqual({
@@ -155,19 +185,50 @@ describe('AuthService', () => {
     });
   });
 
-  it('кладёт в payload только id и email', async () => {
+  it('кладёт в access только id и email, в refresh — ещё deviceId', async () => {
     // Arrange
     findUnique.mockResolvedValue(confirmedUser());
 
     // Act
-    await service.login({ email: EMAIL, password: VALID_PASSWORD });
+    await service.login(
+      { email: EMAIL, password: VALID_PASSWORD },
+      SESSION_CONTEXT,
+    );
 
     // Assert
+    expect(signAsync).toHaveBeenCalledWith({ sub: USER_ID, email: EMAIL });
     expect(signAsync).toHaveBeenCalledWith(
-      { sub: USER_ID, email: EMAIL },
+      {
+        sub: USER_ID,
+        email: EMAIL,
+        deviceId: expect.any(String),
+      },
       expect.anything(),
     );
-    expect(signAsync).toHaveBeenCalledWith({ sub: USER_ID, email: EMAIL });
+  });
+
+  it('пишет Session с хешем refresh, а не сырым токеном', async () => {
+    // Arrange
+    findUnique.mockResolvedValue(confirmedUser());
+
+    // Act
+    await service.login(
+      { email: EMAIL, password: VALID_PASSWORD },
+      SESSION_CONTEXT,
+    );
+
+    // Assert
+    expect(sessionCreate).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        userId: USER_ID,
+        ip: SESSION_CONTEXT.ip,
+        deviceName: SESSION_CONTEXT.deviceName,
+        refreshTokenHash: hashRefreshToken('signed-token'),
+      }),
+    });
+    expect(sessionCreate.mock.calls[0][0].data.refreshTokenHash).not.toBe(
+      'signed-token',
+    );
   });
 
   it('подписывает refresh-токен отдельным секретом', async () => {
@@ -175,7 +236,10 @@ describe('AuthService', () => {
     findUnique.mockResolvedValue(confirmedUser());
 
     // Act
-    await service.login({ email: EMAIL, password: VALID_PASSWORD });
+    await service.login(
+      { email: EMAIL, password: VALID_PASSWORD },
+      SESSION_CONTEXT,
+    );
 
     // Assert
     expect(signAsync).toHaveBeenCalledWith(expect.anything(), {
@@ -190,7 +254,10 @@ describe('AuthService', () => {
 
     // Act
     const error = await captureError(
-      service.login({ email: 'nobody@example.com', password: VALID_PASSWORD }),
+      service.login(
+        { email: 'nobody@example.com', password: VALID_PASSWORD },
+        SESSION_CONTEXT,
+      ),
     );
 
     // Assert
@@ -206,7 +273,10 @@ describe('AuthService', () => {
 
     // Act
     const error = await captureError(
-      service.login({ email: EMAIL, password: WRONG_PASSWORD }),
+      service.login(
+        { email: EMAIL, password: WRONG_PASSWORD },
+        SESSION_CONTEXT,
+      ),
     );
 
     // Assert
@@ -221,7 +291,10 @@ describe('AuthService', () => {
 
     // Act
     const error = await captureError(
-      service.login({ email: EMAIL, password: VALID_PASSWORD }),
+      service.login(
+        { email: EMAIL, password: VALID_PASSWORD },
+        SESSION_CONTEXT,
+      ),
     );
 
     // Assert
@@ -237,7 +310,10 @@ describe('AuthService', () => {
 
     // Act
     const error = await captureError(
-      service.login({ email: EMAIL, password: WRONG_PASSWORD }),
+      service.login(
+        { email: EMAIL, password: WRONG_PASSWORD },
+        SESSION_CONTEXT,
+      ),
     );
 
     // Assert
@@ -253,10 +329,16 @@ describe('AuthService', () => {
 
     // Act
     const unknownEmailError = await captureError(
-      service.login({ email: 'nobody@example.com', password: VALID_PASSWORD }),
+      service.login(
+        { email: 'nobody@example.com', password: VALID_PASSWORD },
+        SESSION_CONTEXT,
+      ),
     );
     const wrongPasswordError = await captureError(
-      service.login({ email: EMAIL, password: WRONG_PASSWORD }),
+      service.login(
+        { email: EMAIL, password: WRONG_PASSWORD },
+        SESSION_CONTEXT,
+      ),
     );
 
     // Assert
@@ -275,7 +357,10 @@ describe('AuthService', () => {
 
     // Act
     await captureError(
-      service.login({ email: 'nobody@example.com', password: VALID_PASSWORD }),
+      service.login(
+        { email: 'nobody@example.com', password: VALID_PASSWORD },
+        SESSION_CONTEXT,
+      ),
     );
 
     // Assert
@@ -678,6 +763,164 @@ describe('AuthService', () => {
       expect(error.code).toBe(AUTH_ERROR_CODE.RECOVERY_CODE_EXPIRED);
       expect(error.getStatus()).toBe(HttpStatus.BAD_REQUEST);
       expect(transaction).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('сессии', () => {
+    const REFRESH_TOKEN = 'refresh-jwt';
+    const refreshPayload = {
+      sub: USER_ID,
+      email: EMAIL,
+      deviceId: DEVICE_ID,
+    };
+
+    const storedSession = () => ({
+      id: 'session-row-id',
+      userId: USER_ID,
+      deviceId: DEVICE_ID,
+      refreshTokenHash: hashRefreshToken(REFRESH_TOKEN),
+      expiresAt: new Date(Date.now() + 60_000),
+    });
+
+    it('refresh ротирует токены и обновляет хеш в Session', async () => {
+      // Arrange
+      verifyAsync.mockResolvedValue(refreshPayload);
+      sessionFindUnique.mockResolvedValue(storedSession());
+
+      // Act
+      const tokens = await service.refreshSession(
+        REFRESH_TOKEN,
+        SESSION_CONTEXT,
+      );
+
+      // Assert
+      expect(tokens).toEqual({
+        accessToken: 'signed-token',
+        refreshToken: 'signed-token',
+      });
+      expect(sessionUpdate).toHaveBeenCalledWith({
+        where: {
+          userId_deviceId: { userId: USER_ID, deviceId: DEVICE_ID },
+        },
+        data: expect.objectContaining({
+          refreshTokenHash: hashRefreshToken('signed-token'),
+          ip: SESSION_CONTEXT.ip,
+          deviceName: SESSION_CONTEXT.deviceName,
+        }),
+      });
+    });
+
+    it('refresh кидает 401, если хеш в Session не совпал', async () => {
+      // Arrange
+      verifyAsync.mockResolvedValue(refreshPayload);
+      sessionFindUnique.mockResolvedValue({
+        ...storedSession(),
+        refreshTokenHash: hashRefreshToken('other-token'),
+      });
+
+      // Act
+      const error = await captureError(
+        service.refreshSession(REFRESH_TOKEN, SESSION_CONTEXT),
+      );
+
+      // Assert
+      expect(error.getStatus()).toBe(HttpStatus.UNAUTHORIZED);
+      expect(sessionUpdate).not.toHaveBeenCalled();
+    });
+
+    it('logout удаляет Session при валидной cookie', async () => {
+      // Arrange
+      verifyAsync.mockResolvedValue(refreshPayload);
+      sessionFindUnique.mockResolvedValue(storedSession());
+
+      // Act
+      await service.logoutByRefresh(REFRESH_TOKEN);
+
+      // Assert
+      expect(sessionDelete).toHaveBeenCalledWith({
+        where: { id: 'session-row-id' },
+      });
+    });
+
+    it('logout без cookie ничего не бросает и не ходит в БД', async () => {
+      // Arrange
+      // Act
+      await service.logoutByRefresh(undefined);
+
+      // Assert
+      expect(verifyAsync).not.toHaveBeenCalled();
+      expect(sessionDelete).not.toHaveBeenCalled();
+    });
+
+    it('listSessions отдаёт только живые сессии пользователя', async () => {
+      // Arrange
+      const rows = [
+        {
+          deviceId: DEVICE_ID,
+          ip: '127.0.0.1',
+          deviceName: 'jest',
+          lastActiveDate: new Date('2026-08-21T01:52:00.000Z'),
+        },
+      ];
+      sessionFindMany.mockResolvedValue(rows);
+
+      // Act
+      const list = await service.listSessions(USER_ID);
+
+      // Assert
+      expect(list).toEqual(rows);
+      expect(sessionFindMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { userId: USER_ID, expiresAt: { gt: expect.any(Date) } },
+        }),
+      );
+    });
+
+    it('terminateSession кидает 404, если девайса нет', async () => {
+      // Arrange
+      sessionFindFirst.mockResolvedValue(null);
+
+      // Act
+      const error = await captureError(
+        service.terminateSession(USER_ID, DEVICE_ID),
+      );
+
+      // Assert
+      expect(error.code).toBe(ERROR_CODE.NOT_FOUND);
+      expect(error.getStatus()).toBe(HttpStatus.NOT_FOUND);
+    });
+
+    it('terminateSession кидает 403, если девайс чужой', async () => {
+      // Arrange
+      sessionFindFirst.mockResolvedValue({
+        id: 'session-row-id',
+        userId: 'other-user',
+        deviceId: DEVICE_ID,
+      });
+
+      // Act
+      const error = await captureError(
+        service.terminateSession(USER_ID, DEVICE_ID),
+      );
+
+      // Assert
+      expect(error.code).toBe(ERROR_CODE.FORBIDDEN);
+      expect(error.getStatus()).toBe(HttpStatus.FORBIDDEN);
+      expect(sessionDelete).not.toHaveBeenCalled();
+    });
+
+    it('terminateOtherSessions удаляет все Session кроме текущего deviceId', async () => {
+      // Arrange
+      verifyAsync.mockResolvedValue(refreshPayload);
+      sessionFindUnique.mockResolvedValue(storedSession());
+
+      // Act
+      await service.terminateOtherSessions(USER_ID, REFRESH_TOKEN);
+
+      // Assert
+      expect(sessionDeleteMany).toHaveBeenCalledWith({
+        where: { userId: USER_ID, deviceId: { not: DEVICE_ID } },
+      });
     });
   });
 });

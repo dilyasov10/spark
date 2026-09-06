@@ -4,6 +4,7 @@ import { JwtModule } from '@nestjs/jwt';
 import { PassportModule } from '@nestjs/passport';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
+import { SecurityController } from './security.controller';
 import { MailModule } from './mailler/mail.module';
 import { RecaptchaService } from './recaptcha/recaptcha.service';
 import { JwtStrategy } from './strategies/jwt.strategy';
@@ -34,7 +35,7 @@ import type { JwtExpiresIn } from './types/jwt-payload';
       }),
     }),
   ],
-  controllers: [AuthController],
+  controllers: [AuthController, SecurityController],
   providers: [AuthService, JwtStrategy, RecaptchaService],
 })
 export class AuthModule {}

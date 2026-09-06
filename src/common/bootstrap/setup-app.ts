@@ -1,4 +1,5 @@
 import { INestApplication } from '@nestjs/common';
+import cookieParser from 'cookie-parser';
 
 /**
  * Общий префикс всех HTTP-роутов: контроллер `@Controller('auth')` наружу
@@ -16,4 +17,6 @@ export const API_PREFIX = 'api';
  */
 export function setupApp(app: INestApplication): void {
   app.setGlobalPrefix(API_PREFIX);
+  // Refresh и OAuth state читаются из cookie. Без парсера `req.cookies` пустой.
+  app.use(cookieParser());
 }
