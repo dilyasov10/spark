@@ -3,7 +3,7 @@ pipeline {
     agent any
     environment {
         ENV_TYPE = "production"
-        PORT = 4409
+        PORT = 4419
         NAMESPACE = "sprak-by-ru"
         REGISTRY_HOSTNAME = "alhmdd2405"
         PROJECT = "nest-backend-gateway"
