@@ -1,6 +1,7 @@
 import { HttpStatus } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
+import { ClientProxy } from '@nestjs/microservices';
 import * as bcrypt from 'bcrypt';
 import { AUTH_ERROR_CODE, AUTH_ERROR_MESSAGE, AppException } from '@app/common';
 import { PrismaService } from '@app/prisma';
@@ -58,6 +59,7 @@ describe('AuthService', () => {
       {
         getOrThrow: jest.fn((key: string) => `value-of-${key}`),
       } as unknown as ConfigService,
+      { send: jest.fn() } as unknown as ClientProxy,
     );
   });
 
@@ -67,7 +69,7 @@ describe('AuthService', () => {
 
   it('возвращает пару токенов при верных учётных данных', async () => {
     // Arrange
-    findUnique.mockResolvedValue({ id: USER_ID, email: EMAIL, passwordHash });
+    findUnique.mockResolvedValue({ id: USER_ID, email: EMAIL, passwordHash, isConfirmed: true });
 
     // Act
     const tokens = await service.login({
@@ -84,7 +86,7 @@ describe('AuthService', () => {
 
   it('кладёт в payload только id и email', async () => {
     // Arrange
-    findUnique.mockResolvedValue({ id: USER_ID, email: EMAIL, passwordHash });
+    findUnique.mockResolvedValue({ id: USER_ID, email: EMAIL, passwordHash, isConfirmed: true });
 
     // Act
     await service.login({ email: EMAIL, password: VALID_PASSWORD });
@@ -99,7 +101,7 @@ describe('AuthService', () => {
 
   it('подписывает refresh-токен отдельным секретом', async () => {
     // Arrange
-    findUnique.mockResolvedValue({ id: USER_ID, email: EMAIL, passwordHash });
+    findUnique.mockResolvedValue({ id: USER_ID, email: EMAIL, passwordHash, isConfirmed: true });
 
     // Act
     await service.login({ email: EMAIL, password: VALID_PASSWORD });
@@ -129,7 +131,7 @@ describe('AuthService', () => {
 
   it('кидает INVALID_CREDENTIALS со статусом 401, когда пароль неверный', async () => {
     // Arrange
-    findUnique.mockResolvedValue({ id: USER_ID, email: EMAIL, passwordHash });
+    findUnique.mockResolvedValue({ id: USER_ID, email: EMAIL, passwordHash, isConfirmed: true });
 
     // Act
     const error = await captureError(
@@ -149,6 +151,7 @@ describe('AuthService', () => {
       id: USER_ID,
       email: EMAIL,
       passwordHash,
+      isConfirmed: true,
     });
 
     // Act

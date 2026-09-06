@@ -19,6 +19,8 @@ export interface SeedUser {
   readonly email: string;
   readonly firstName: string;
   readonly lastName: string;
+  /** Seed-аккаунты сразу подтверждены — ими можно логиниться без confirmation-flow. */
+  readonly isConfirmed: true;
   readonly createdAt: Date;
 }
 
@@ -29,6 +31,7 @@ export const SEED_USERS: readonly SeedUser[] = [
     email: 'anna.kovaleva@gmail.com',
     firstName: 'Анна',
     lastName: 'Ковалёва',
+    isConfirmed: true,
     createdAt: new Date('2026-01-17T08:42:00Z'),
   },
   {
@@ -37,6 +40,7 @@ export const SEED_USERS: readonly SeedUser[] = [
     email: 'd.sokolov@yandex.ru',
     firstName: 'Дмитрий',
     lastName: 'Соколов',
+    isConfirmed: true,
     createdAt: new Date('2026-01-23T14:05:00Z'),
   },
   {
@@ -45,6 +49,7 @@ export const SEED_USERS: readonly SeedUser[] = [
     email: 'marina.belova@outlook.com',
     firstName: 'Марина',
     lastName: 'Белова',
+    isConfirmed: true,
     createdAt: new Date('2026-02-04T19:30:00Z'),
   },
   {
@@ -53,6 +58,7 @@ export const SEED_USERS: readonly SeedUser[] = [
     email: 'ilya.ershov@gmail.com',
     firstName: 'Илья',
     lastName: 'Ершов',
+    isConfirmed: true,
     createdAt: new Date('2026-02-11T07:15:00Z'),
   },
   {
@@ -61,6 +67,7 @@ export const SEED_USERS: readonly SeedUser[] = [
     email: 'sofia.nikitina@mail.ru',
     firstName: 'София',
     lastName: 'Никитина',
+    isConfirmed: true,
     createdAt: new Date('2026-02-28T11:50:00Z'),
   },
   {
@@ -69,6 +76,7 @@ export const SEED_USERS: readonly SeedUser[] = [
     email: 'timur.ashirov@gmail.com',
     firstName: 'Тимур',
     lastName: 'Аширов',
+    isConfirmed: true,
     createdAt: new Date('2026-03-09T06:20:00Z'),
   },
   {
@@ -77,6 +85,7 @@ export const SEED_USERS: readonly SeedUser[] = [
     email: 'elena.voronova@proton.me',
     firstName: 'Елена',
     lastName: 'Воронова',
+    isConfirmed: true,
     createdAt: new Date('2026-03-21T16:44:00Z'),
   },
   {
@@ -85,6 +94,7 @@ export const SEED_USERS: readonly SeedUser[] = [
     email: 'artem.lebedev@gmail.com',
     firstName: 'Артём',
     lastName: 'Лебедев',
+    isConfirmed: true,
     createdAt: new Date('2026-04-02T21:10:00Z'),
   },
 ];

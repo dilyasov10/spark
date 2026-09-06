@@ -5,6 +5,7 @@ import { ClientsModule } from '@nestjs/microservices';
 import { RMQ_CLIENT, RMQ_QUEUE, rmqClientOptions } from '@app/common';
 import { AuthController } from './auth.controller';
 import { JwtStrategy } from './strategies/jwt.strategy';
+import { RecaptchaService } from './recaptcha/recaptcha.service';
 
 /**
  * HTTP-вход в авторизацию. Ни `JwtModule`, ни Prisma здесь нет: пароли
@@ -34,6 +35,6 @@ import { JwtStrategy } from './strategies/jwt.strategy';
     ]),
   ],
   controllers: [AuthController],
-  providers: [JwtStrategy],
+  providers: [JwtStrategy, RecaptchaService],
 })
 export class AuthModule {}
