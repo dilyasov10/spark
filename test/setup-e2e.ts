@@ -25,5 +25,16 @@ process.env.EMAIL_USER = 'e2e@example.com';
 process.env.EMAIL_PASS = 'e2e-email-password';
 process.env.FRONTEND_URL = 'http://localhost:3001';
 
+// Google / GitHub OAuth: сервисы читают ключи в момент редиректа/callback,
+// но e2e на oauth-роуты тоже ходят — без значений getOrThrow упадёт.
+process.env.GOOGLE_CLIENT_ID = 'e2e-google-client-id';
+process.env.GOOGLE_CLIENT_SECRET = 'e2e-google-client-secret';
+process.env.GOOGLE_CALLBACK_URL =
+  'http://localhost:3000/api/auth/oauth/google/callback';
+process.env.GITHUB_CLIENT_ID = 'e2e-github-client-id';
+process.env.GITHUB_CLIENT_SECRET = 'e2e-github-client-secret';
+process.env.GITHUB_CALLBACK_URL =
+  'http://localhost:3000/api/auth/oauth/github/callback';
+
 // reCAPTCHA в e2e не ходим в Google — RecaptchaService при false сразу return.
 process.env.RECAPTCHA_ENABLED = 'false';

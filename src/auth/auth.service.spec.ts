@@ -4,7 +4,7 @@ import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
 import { AppException } from '../common/errors/app.exception';
 import { PrismaService } from '../prisma/prisma.service';
-import { BCRYPT_ROUNDS } from './auth.constants';
+import { BCRYPT_ROUNDS, OAUTH_PROVIDER_GOOGLE } from './auth.constants';
 import { AUTH_ERROR_CODE, AUTH_ERROR_MESSAGE } from './auth.error-code';
 import { AuthService } from './auth.service';
 
@@ -49,11 +49,16 @@ describe('AuthService', () => {
   let passwordRecoveryUpsert: jest.Mock;
   let passwordRecoveryDelete: jest.Mock;
   let sessionDeleteMany: jest.Mock;
+  let oAuthProviderFindUnique: jest.Mock;
+  let oAuthProviderCreate: jest.Mock;
+  let userFindMany: jest.Mock;
+  let emailConfirmationDeleteMany: jest.Mock;
   let userUpdate: jest.Mock;
   let transaction: jest.Mock;
   let signAsync: jest.Mock;
   let sendRegistrationConfirmation: jest.Mock;
   let sendPasswordRecovery: jest.Mock;
+  let sendOAuthRegistrationNotification: jest.Mock;
   let verifyRecaptcha: jest.Mock;
   let passwordHash: string;
 
@@ -76,17 +81,23 @@ describe('AuthService', () => {
     passwordRecoveryUpsert = jest.fn().mockResolvedValue(undefined);
     passwordRecoveryDelete = jest.fn().mockResolvedValue(undefined);
     sessionDeleteMany = jest.fn().mockResolvedValue({ count: 0 });
+    oAuthProviderFindUnique = jest.fn().mockResolvedValue(null);
+    oAuthProviderCreate = jest.fn().mockResolvedValue(undefined);
+    userFindMany = jest.fn().mockResolvedValue([]);
+    emailConfirmationDeleteMany = jest.fn().mockResolvedValue({ count: 0 });
     userUpdate = jest.fn().mockResolvedValue(undefined);
     transaction = jest.fn(async (ops: Promise<unknown>[]) => Promise.all(ops));
     signAsync = jest.fn().mockResolvedValue('signed-token');
     sendRegistrationConfirmation = jest.fn().mockResolvedValue(undefined);
     sendPasswordRecovery = jest.fn().mockResolvedValue(undefined);
+    sendOAuthRegistrationNotification = jest.fn().mockResolvedValue(undefined);
     verifyRecaptcha = jest.fn().mockResolvedValue(undefined);
 
     service = new AuthService(
       {
         user: {
           findUnique,
+          findMany: userFindMany,
           delete: userDelete,
           create: userCreate,
           update: userUpdate,
@@ -94,6 +105,7 @@ describe('AuthService', () => {
         emailConfirmation: {
           findUnique: emailConfirmationFindUnique,
           delete: emailConfirmationDelete,
+          deleteMany: emailConfirmationDeleteMany,
           upsert: emailConfirmationUpsert,
         },
         passwordRecovery: {
@@ -104,6 +116,10 @@ describe('AuthService', () => {
         session: {
           deleteMany: sessionDeleteMany,
         },
+        oAuthProvider: {
+          findUnique: oAuthProviderFindUnique,
+          create: oAuthProviderCreate,
+        },
         $transaction: transaction,
       } as unknown as PrismaService,
       { signAsync } as unknown as JwtService,
@@ -113,6 +129,7 @@ describe('AuthService', () => {
       {
         sendRegistrationConfirmation,
         sendPasswordRecovery,
+        sendOAuthRegistrationNotification,
       } as never,
       { verify: verifyRecaptcha } as never,
     );
@@ -678,6 +695,141 @@ describe('AuthService', () => {
       expect(error.code).toBe(AUTH_ERROR_CODE.RECOVERY_CODE_EXPIRED);
       expect(error.getStatus()).toBe(HttpStatus.BAD_REQUEST);
       expect(transaction).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('loginWithOAuth', () => {
+    const googleProfile = {
+      providerId: 'google-sub-123',
+      email: 'google.user@example.com',
+      firstName: 'Иван',
+      lastName: 'Петров',
+    };
+
+    it('кидает OAUTH_EMAIL_REQUIRED, если провайдер не отдал email', async () => {
+      const error = await captureError(
+        service.loginWithOAuth(OAUTH_PROVIDER_GOOGLE, {
+          providerId: 'google-sub-123',
+        }),
+      );
+
+      expect(error.code).toBe(AUTH_ERROR_CODE.OAUTH_EMAIL_REQUIRED);
+      expect(error.message).toBe(AUTH_ERROR_MESSAGE.OAUTH_EMAIL_REQUIRED);
+      expect(oAuthProviderFindUnique).not.toHaveBeenCalled();
+      expect(sendOAuthRegistrationNotification).not.toHaveBeenCalled();
+    });
+
+    it('логинит существующего OAuth-пользователя без нового User', async () => {
+      oAuthProviderFindUnique.mockResolvedValue({
+        provider: OAUTH_PROVIDER_GOOGLE,
+        providerId: googleProfile.providerId,
+        user: { id: USER_ID, email: EMAIL },
+      });
+
+      const tokens = await service.loginWithOAuth(
+        OAUTH_PROVIDER_GOOGLE,
+        googleProfile,
+      );
+
+      expect(tokens).toEqual({
+        accessToken: 'signed-token',
+        refreshToken: 'signed-token',
+      });
+      expect(userCreate).not.toHaveBeenCalled();
+      expect(oAuthProviderCreate).not.toHaveBeenCalled();
+      expect(sendOAuthRegistrationNotification).not.toHaveBeenCalled();
+    });
+
+    it('привязывает провайдера к существующему подтверждённому User', async () => {
+      findUnique.mockResolvedValue({
+        id: USER_ID,
+        email: googleProfile.email,
+        isConfirmed: true,
+      });
+
+      await service.loginWithOAuth(OAUTH_PROVIDER_GOOGLE, googleProfile);
+
+      expect(oAuthProviderCreate).toHaveBeenCalledWith({
+        data: {
+          userId: USER_ID,
+          provider: OAUTH_PROVIDER_GOOGLE,
+          providerId: googleProfile.providerId,
+        },
+      });
+      expect(userCreate).not.toHaveBeenCalled();
+      expect(sendOAuthRegistrationNotification).not.toHaveBeenCalled();
+      expect(transaction).not.toHaveBeenCalled();
+    });
+
+    it('подтверждает неподтверждённого User и не шлёт welcome-письмо', async () => {
+      findUnique.mockResolvedValue({
+        id: USER_ID,
+        email: googleProfile.email,
+        isConfirmed: false,
+      });
+
+      await service.loginWithOAuth(OAUTH_PROVIDER_GOOGLE, googleProfile);
+
+      expect(oAuthProviderCreate).toHaveBeenCalledTimes(1);
+      expect(transaction).toHaveBeenCalledTimes(1);
+      expect(userUpdate).toHaveBeenCalledWith({
+        where: { id: USER_ID },
+        data: { isConfirmed: true },
+      });
+      expect(emailConfirmationDeleteMany).toHaveBeenCalledWith({
+        where: { userId: USER_ID },
+      });
+      expect(sendOAuthRegistrationNotification).not.toHaveBeenCalled();
+    });
+
+    it('создаёт User без пароля, username client1 и шлёт уведомление', async () => {
+      userCreate.mockResolvedValue({
+        id: USER_ID,
+        email: googleProfile.email,
+      });
+
+      await service.loginWithOAuth(OAUTH_PROVIDER_GOOGLE, googleProfile);
+
+      const [[createArgs]] = userCreate.mock.calls as [
+        [
+          {
+            data: {
+              username: string;
+              passwordHash: string | null;
+              isConfirmed: boolean;
+              firstName: string;
+              lastName: string;
+            };
+          },
+        ],
+      ];
+      expect(createArgs.data.username).toBe('client1');
+      expect(createArgs.data.passwordHash).toBeNull();
+      expect(createArgs.data.isConfirmed).toBe(true);
+      expect(createArgs.data.firstName).toBe('Иван');
+      expect(createArgs.data.lastName).toBe('Петров');
+      expect(sendOAuthRegistrationNotification).toHaveBeenCalledWith(
+        googleProfile.email,
+      );
+    });
+
+    it('берёт следующий свободный client{N} при занятых username', async () => {
+      userFindMany.mockResolvedValue([
+        { username: 'client1' },
+        { username: 'client3' },
+        { username: 'client_skip' },
+      ]);
+      userCreate.mockResolvedValue({
+        id: USER_ID,
+        email: googleProfile.email,
+      });
+
+      await service.loginWithOAuth(OAUTH_PROVIDER_GOOGLE, googleProfile);
+
+      const [[createArgs]] = userCreate.mock.calls as [
+        [{ data: { username: string } }],
+      ];
+      expect(createArgs.data.username).toBe('client4');
     });
   });
 });

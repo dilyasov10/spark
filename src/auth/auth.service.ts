@@ -9,8 +9,15 @@ import { PrismaService } from '../prisma/prisma.service';
 import {
   BCRYPT_ROUNDS,
   EMAIL_CONFIRMATION_TTL_MS,
+  OAUTH_FALLBACK_FIRST_NAME,
+  OAUTH_FALLBACK_LAST_NAME,
+  OAUTH_USERNAME_PREFIX,
   PASSWORD_RECOVERY_TTL_MS,
 } from './auth.constants';
+import {
+  FIRST_NAME_MAX_LENGTH,
+  LAST_NAME_MAX_LENGTH,
+} from './dto/constraints/registration.constraints';
 import { AUTH_ERROR_CODE, AUTH_ERROR_MESSAGE } from './auth.error-code';
 import { LoginDto } from './dto/login.dto';
 import { NewPasswordDto } from './dto/new-password.dto';
@@ -25,6 +32,10 @@ import type {
   JwtPayload,
   TokenPair,
 } from './types/jwt-payload';
+import type { OAuthProfile, OAuthProviderName } from './types/oauth-profile';
+
+/** Сколько раз пробуем подобрать свободный `client{N}` при гонке по username. */
+const OAUTH_USERNAME_MAX_ATTEMPTS = 20;
 
 /**
  * Хеш несуществующего пароля. С ним сравниваем, когда пользователь не найден:
@@ -101,6 +112,75 @@ export class AuthService {
     }
 
     return this.issueTokens({ sub: user.id, email: user.email });
+  }
+
+  /**
+   * Вход или регистрация по профилю Google / GitHub. Сессию в БД пока не пишет —
+   * так же, как текущий `login`; когда появится создание Session, оба пути
+   * должны вызывать один helper.
+   *
+   * @throws AppException `OAUTH_EMAIL_REQUIRED`, если провайдер не отдал email
+   */
+  async loginWithOAuth(
+    provider: OAuthProviderName,
+    profile: OAuthProfile,
+  ): Promise<TokenPair> {
+    if (!profile.email) {
+      throw new AppException({
+        code: AUTH_ERROR_CODE.OAUTH_EMAIL_REQUIRED,
+        message: AUTH_ERROR_MESSAGE.OAUTH_EMAIL_REQUIRED,
+      });
+    }
+
+    const linked = await this.prisma.oAuthProvider.findUnique({
+      where: {
+        provider_providerId: {
+          provider,
+          providerId: profile.providerId,
+        },
+      },
+      include: { user: true },
+    });
+
+    if (linked) {
+      return this.issueTokens({
+        sub: linked.user.id,
+        email: linked.user.email,
+      });
+    }
+
+    const existingUser = await this.prisma.user.findUnique({
+      where: { email: profile.email },
+    });
+
+    if (existingUser) {
+      await this.linkOAuthProvider(
+        existingUser.id,
+        provider,
+        profile.providerId,
+      );
+      if (!existingUser.isConfirmed) {
+        await this.prisma.$transaction([
+          this.prisma.user.update({
+            where: { id: existingUser.id },
+            data: { isConfirmed: true },
+          }),
+          this.prisma.emailConfirmation.deleteMany({
+            where: { userId: existingUser.id },
+          }),
+        ]);
+      }
+
+      return this.issueTokens({
+        sub: existingUser.id,
+        email: existingUser.email,
+      });
+    }
+
+    const created = await this.createUserFromOAuth(provider, profile);
+    await this.emailService.sendOAuthRegistrationNotification(created.email);
+
+    return this.issueTokens({ sub: created.id, email: created.email });
   }
 
   /**
@@ -390,6 +470,102 @@ export class AuthService {
     return { accessToken, refreshToken };
   }
 
+  private async linkOAuthProvider(
+    userId: string,
+    provider: OAuthProviderName,
+    providerId: string,
+  ): Promise<void> {
+    try {
+      await this.prisma.oAuthProvider.create({
+        data: {
+          userId,
+          provider,
+          providerId,
+        },
+      });
+    } catch (error) {
+      // Гонка: параллельный callback уже создал ту же пару provider+id.
+      if (!isUniqueConstraint(error, 'providerId')) {
+        throw error;
+      }
+    }
+  }
+
+  private async createUserFromOAuth(
+    provider: OAuthProviderName,
+    profile: OAuthProfile,
+  ): Promise<{ id: string; email: string }> {
+    const email = profile.email;
+    if (!email) {
+      throw new AppException({
+        code: AUTH_ERROR_CODE.OAUTH_EMAIL_REQUIRED,
+        message: AUTH_ERROR_MESSAGE.OAUTH_EMAIL_REQUIRED,
+      });
+    }
+
+    const firstName = pickName(
+      profile.firstName,
+      OAUTH_FALLBACK_FIRST_NAME,
+      FIRST_NAME_MAX_LENGTH,
+    );
+    const lastName = pickName(
+      profile.lastName,
+      OAUTH_FALLBACK_LAST_NAME,
+      LAST_NAME_MAX_LENGTH,
+    );
+
+    for (let attempt = 0; attempt < OAUTH_USERNAME_MAX_ATTEMPTS; attempt++) {
+      const username = await this.nextClientUsername();
+      try {
+        return await this.prisma.user.create({
+          data: {
+            username,
+            email,
+            passwordHash: null,
+            firstName,
+            lastName,
+            isConfirmed: true,
+            providers: {
+              create: {
+                provider,
+                providerId: profile.providerId,
+              },
+            },
+          },
+          select: { id: true, email: true },
+        });
+      } catch (error) {
+        if (isUniqueConstraint(error, 'username')) {
+          continue;
+        }
+        throw error;
+      }
+    }
+
+    throw new AppException({
+      code: AUTH_ERROR_CODE.USERNAME_ALREADY_EXISTS,
+      message: AUTH_ERROR_MESSAGE.USERNAME_ALREADY_EXISTS,
+    });
+  }
+
+  private async nextClientUsername(): Promise<string> {
+    const users = await this.prisma.user.findMany({
+      where: { username: { startsWith: OAUTH_USERNAME_PREFIX } },
+      select: { username: true },
+    });
+
+    let max = 0;
+    const numbered = new RegExp(`^${OAUTH_USERNAME_PREFIX}(\\d+)$`);
+    for (const { username } of users) {
+      const match = numbered.exec(username);
+      if (match) {
+        max = Math.max(max, Number(match[1]));
+      }
+    }
+
+    return `${OAUTH_USERNAME_PREFIX}${max + 1}`;
+  }
+
   private async sendConfirmationEmail(
     email: string,
     code: string,
@@ -409,4 +585,47 @@ export class AuthService {
 
     await this.emailService.sendPasswordRecovery(email, recoveryUrl);
   }
+}
+
+function pickName(
+  value: string | undefined,
+  fallback: string,
+  maxLength: number,
+): string {
+  const trimmed = value?.trim() ?? '';
+  if (trimmed.length === 0) {
+    return fallback;
+  }
+
+  return trimmed.slice(0, maxLength);
+}
+
+/**
+ * Prisma 7 отдаёт `P2002` на unique. `target` — список полей индекса
+ * (`username` или `provider`+`providerId`).
+ */
+function isUniqueConstraint(error: unknown, field: string): boolean {
+  if (typeof error !== 'object' || error === null) {
+    return false;
+  }
+  if (!('code' in error) || error.code !== 'P2002') {
+    return false;
+  }
+  if (
+    !('meta' in error) ||
+    typeof error.meta !== 'object' ||
+    error.meta === null
+  ) {
+    return false;
+  }
+  if (!('target' in error.meta)) {
+    return false;
+  }
+
+  const target = error.meta.target;
+  if (Array.isArray(target)) {
+    return target.includes(field);
+  }
+
+  return typeof target === 'string' && target.includes(field);
 }

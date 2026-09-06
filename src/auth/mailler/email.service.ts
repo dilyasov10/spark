@@ -71,4 +71,30 @@ export class EmailService {
       });
     }
   }
+
+  /**
+   * Уведомление об успешной регистрации через OAuth. Confirmation-кода нет:
+   * email от Google / GitHub считаем подтверждённым.
+   */
+  async sendOAuthRegistrationNotification(email: string): Promise<void> {
+    try {
+      await this.transporter.sendMail({
+        from: this.from,
+        to: email,
+        subject: 'Spark — welcome',
+        text: 'Your Spark account has been created via OAuth.',
+        html: '<p>Your Spark account has been created via OAuth.</p>',
+      });
+
+      this.logger.log(`OAuth registration email sent to ${email}`);
+    } catch (error) {
+      this.logger.error(
+        `Email send failed: ${error instanceof Error ? error.message : 'unknown error'}`,
+      );
+      throw new AppException({
+        code: ERROR_CODE.BAD_REQUEST,
+        message: 'Не удалось отправить письмо',
+      });
+    }
+  }
 }

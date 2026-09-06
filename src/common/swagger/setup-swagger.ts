@@ -22,7 +22,7 @@ export function setupSwagger(app: INestApplication): void {
         'пустые коллекции — [], ошибки — { code, message, details }.',
     )
     .setVersion('1.0')
-    .addBearerAuth()
+    .addCookieAuth('accessToken')
     .build();
 
   const document = SwaggerModule.createDocument(app, config, {
