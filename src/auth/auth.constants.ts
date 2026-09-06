@@ -67,59 +67,44 @@ const ACCESS_TOKEN_COOKIE_MAX_AGE_MS = 15 * 60 * 1000;
 const REFRESH_TOKEN_COOKIE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 
 /**
- * Access и refresh — httpOnly: в `localStorage` их достал бы любой XSS,
- * а из cookie с этим флагом JS не прочитает.
+ * Атрибуты, по которым браузер отличает одну cookie от другой. Вынесены
+ * отдельно, потому что выдача и гашение обязаны совпадать до последнего поля:
+ * cookie с тем же именем, но другим `path` или `sameSite`, для браузера чужая,
+ * и на выходе из аккаунта она не удалится.
+ *
+ * Refresh-токен уходит только в httpOnly-cookie: в `localStorage` его достал бы
+ * любой XSS, а из cookie с этим флагом JS его не прочитает.
  *
  * `sameSite: 'none'` нужен, когда фронт живёт на другом домене, но браузеры
  * принимают его только вместе с `secure`, а `secure` не работает по http —
  * поэтому локально режим мягче.
  */
-export function accessCookieOptions(isProduction: boolean): CookieOptions {
-  return {
-    httpOnly: true,
-    secure: isProduction,
-    sameSite: isProduction ? 'none' : 'lax',
-    path: ACCESS_TOKEN_COOKIE_PATH,
-    maxAge: ACCESS_TOKEN_COOKIE_MAX_AGE_MS,
-  };
-}
-
-export function refreshCookieOptions(isProduction: boolean): CookieOptions {
+function refreshCookieAttributes(isProduction: boolean): CookieOptions {
   return {
     httpOnly: true,
     secure: isProduction,
     sameSite: isProduction ? 'none' : 'lax',
     path: REFRESH_TOKEN_COOKIE_PATH,
+  };
+}
+
+/** Опции cookie, которую выдаём при входе. */
+export function refreshCookieOptions(isProduction: boolean): CookieOptions {
+  return {
+    ...refreshCookieAttributes(isProduction),
     maxAge: REFRESH_TOKEN_COOKIE_MAX_AGE_MS,
   };
 }
 
 /**
- * `state` ставим на том же path, что и refresh: callback читает cookie
- * с `/api/auth/oauth/.../callback`. `sameSite: lax` достаточно — это
- * top-level GET после провайдера, не XHR с другого origin.
+ * Опции для `res.clearCookie` при выходе: те же атрибуты, но без `maxAge` —
+ * гашение это та же cookie с датой истечения в прошлом, и срок жизни ей уже
+ * не нужен. Express выбрасывает `maxAge` в `clearCookie` и сам, но передавать
+ * туда опции выдачи — значит держать выход из аккаунта на детали реализации
+ * соседней библиотеки.
  */
-export function oauthStateCookieOptions(isProduction: boolean): CookieOptions {
-  return {
-    httpOnly: true,
-    secure: isProduction,
-    sameSite: isProduction ? 'none' : 'lax',
-    path: REFRESH_TOKEN_COOKIE_PATH,
-    maxAge: OAUTH_STATE_COOKIE_MAX_AGE_MS,
-  };
-}
-
-/** Редирект на фронт после OAuth: на успехе без query, на отказе — код ошибки. */
-export function buildOAuthFrontendRedirectUrl(
-  frontendUrl: string,
-  error?: string,
-): string {
-  const base = frontendUrl.endsWith('/') ? frontendUrl : `${frontendUrl}/`;
-  const url = new URL(OAUTH_FRONTEND_CALLBACK_PATH, base);
-
-  if (error) {
-    url.searchParams.set('error', error);
-  }
-
-  return url.toString();
+export function clearRefreshCookieOptions(
+  isProduction: boolean,
+): CookieOptions {
+  return refreshCookieAttributes(isProduction);
 }

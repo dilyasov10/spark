@@ -4,7 +4,10 @@ import * as bcrypt from 'bcrypt';
 import request from 'supertest';
 import { App } from 'supertest/types';
 import { AppModule } from '../src/app.module';
-import { BCRYPT_ROUNDS } from '../src/auth/auth.constants';
+import {
+  BCRYPT_ROUNDS,
+  REFRESH_TOKEN_COOKIE,
+} from '../src/auth/auth.constants';
 import { AUTH_ERROR_CODE } from '../src/auth/auth.error-code';
 import { setupApp } from '../src/common/bootstrap/setup-app';
 import { ApiErrorDto } from '../src/common/dto/api-error.dto';
@@ -28,6 +31,32 @@ const USER = {
 
 interface FindUniqueArgs {
   where: { id?: string; email?: string };
+}
+
+/** Заголовок `Set-Cookie` с refresh-токеном или падение с внятным текстом. */
+function refreshCookieHeader(response: request.Response): string {
+  const cookies = (response.headers['set-cookie'] ?? []) as unknown as string[];
+  const cookie = cookies.find((item) =>
+    item.startsWith(`${REFRESH_TOKEN_COOKIE}=`),
+  );
+
+  if (cookie === undefined) {
+    throw new Error(`В ответе нет cookie ${REFRESH_TOKEN_COOKIE}`);
+  }
+
+  return cookie;
+}
+
+/**
+ * Атрибуты, по которым браузер решает, та же это cookie или другая. Срок
+ * жизни в них не входит — им выдача и гашение как раз и отличаются.
+ */
+function cookieIdentity(cookie: string): string[] {
+  return cookie
+    .split('; ')
+    .slice(1)
+    .filter((attribute) => !/^(Max-Age|Expires)=/i.test(attribute))
+    .sort();
 }
 
 describe('Авторизация (e2e)', () => {
@@ -191,75 +220,66 @@ describe('Авторизация (e2e)', () => {
     });
   });
 
-  describe('GET /api/auth/oauth/google', () => {
-    it('редиректит на Google и ставит csrf-cookie state', async () => {
+  describe('POST /api/auth/logout', () => {
+    it('отвечает 200, а не 201, и подтверждает выход', async () => {
+      // Arrange
+      // Act
       const response = await request(app.getHttpServer())
-        .get('/api/auth/oauth/google')
-        .redirects(0)
-        .expect(HttpStatus.FOUND);
+        .post('/api/auth/logout')
+        .expect(HttpStatus.OK);
 
-      const location = new URL(response.headers.location);
-      expect(location.origin + location.pathname).toBe(
-        'https://accounts.google.com/o/oauth2/v2/auth',
-      );
-      expect(location.searchParams.get('scope')).toBe('openid email profile');
-
-      const cookies = response.headers['set-cookie'] as unknown as string[];
-      const stateCookie = cookies.find((cookie) =>
-        cookie.startsWith('oauthGoogleState='),
-      );
-      expect(stateCookie).toBeDefined();
-      expect(stateCookie).toContain('HttpOnly');
-      expect(stateCookie).toContain('Path=/api/auth');
+      // Assert
+      expect(response.body).toEqual({ success: true });
     });
-  });
 
-  describe('GET /api/auth/oauth/google/callback', () => {
-    it('редиректит на фронт с error, если Google не прислал code', async () => {
+    it('гасит cookie: пустое значение и дата истечения в прошлом', async () => {
+      // Arrange
+      // Act
       const response = await request(app.getHttpServer())
-        .get('/api/auth/oauth/google/callback')
-        .redirects(0)
-        .expect(HttpStatus.FOUND);
+        .post('/api/auth/logout')
+        .expect(HttpStatus.OK);
 
-      expect(response.headers.location).toBe(
-        'http://localhost:3001/auth/oauth?error=OAUTH_FAILED',
+      // Assert
+      const cookie = refreshCookieHeader(response);
+      expect(cookie).toMatch(new RegExp(`^${REFRESH_TOKEN_COOKIE}=;`));
+      expect(cookie).toContain('Expires=Thu, 01 Jan 1970');
+      // Срок жизни перебил бы дату истечения и продлил cookie.
+      expect(cookie).not.toContain('Max-Age');
+    });
+
+    it('гасит cookie теми же атрибутами, с какими выдал её при входе', async () => {
+      // Arrange: с другим Path или SameSite браузер счёл бы cookie чужой
+      // и оставил бы refresh-токен жить после выхода.
+      const loginResponse = await request(app.getHttpServer())
+        .post('/api/auth/login')
+        .send({ email: USER.email, password: PASSWORD })
+        .expect(HttpStatus.OK);
+
+      // Act
+      const logoutResponse = await request(app.getHttpServer())
+        .post('/api/auth/logout')
+        .expect(HttpStatus.OK);
+
+      // Assert
+      expect(cookieIdentity(refreshCookieHeader(logoutResponse))).toEqual(
+        cookieIdentity(refreshCookieHeader(loginResponse)),
       );
     });
-  });
 
-  describe('GET /api/auth/oauth/github', () => {
-    it('редиректит на GitHub и ставит csrf-cookie state', async () => {
+    it('не требует access-токена: выйти можно и с протухшей сессией', async () => {
+      // Arrange: гарда ответила бы на такой заголовок 401, и пользователь
+      // остался бы с живой cookie.
+      const forgedToken =
+        'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ4In0.not-a-signature';
+
+      // Act
       const response = await request(app.getHttpServer())
-        .get('/api/auth/oauth/github')
-        .redirects(0)
-        .expect(HttpStatus.FOUND);
+        .post('/api/auth/logout')
+        .set('Authorization', `Bearer ${forgedToken}`)
+        .expect(HttpStatus.OK);
 
-      const location = new URL(response.headers.location);
-      expect(location.origin + location.pathname).toBe(
-        'https://github.com/login/oauth/authorize',
-      );
-      expect(location.searchParams.get('scope')).toBe('read:user user:email');
-
-      const cookies = response.headers['set-cookie'] as unknown as string[];
-      const stateCookie = cookies.find((cookie) =>
-        cookie.startsWith('oauthGithubState='),
-      );
-      expect(stateCookie).toBeDefined();
-      expect(stateCookie).toContain('HttpOnly');
-      expect(stateCookie).toContain('Path=/api/auth');
-    });
-  });
-
-  describe('GET /api/auth/oauth/github/callback', () => {
-    it('редиректит на фронт с error, если GitHub не прислал code', async () => {
-      const response = await request(app.getHttpServer())
-        .get('/api/auth/oauth/github/callback')
-        .redirects(0)
-        .expect(HttpStatus.FOUND);
-
-      expect(response.headers.location).toBe(
-        'http://localhost:3001/auth/oauth?error=OAUTH_FAILED',
-      );
+      // Assert
+      expect(response.body).toEqual({ success: true });
     });
   });
 
