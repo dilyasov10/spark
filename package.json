@@ -20,6 +20,7 @@
     "db:deploy": "prisma migrate deploy",
     "db:studio": "prisma studio",
     "format": "prettier --write \"apps/**/*.ts\" \"libs/**/*.ts\"",
+    "swagger:json": "ts-node --project scripts/tsconfig.json scripts/generate-openapi.ts",
     "start": "nest start gateway",
     "start:dev": "nest start gateway --watch",
     "start:dev:auth": "nest start auth --watch",

@@ -1,0 +1,365 @@
+{
+  "openapi": "3.0.0",
+  "paths": {
+    "/api": {
+      "get": {
+        "description": "Отвечает 200, пока процесс жив. Сюда ходят readiness- и liveness-пробы Kubernetes (apps/gateway/deployment.yaml); состояние базы и брокера эндпоинт не проверяет. Фронтенду не нужен.",
+        "operationId": "getHello",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Сервис отвечает",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "string",
+                  "example": "Hello World!"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Проверка живости сервиса",
+        "tags": [
+          "health"
+        ]
+      }
+    },
+    "/api/auth/login": {
+      "post": {
+        "description": "Возвращает accessToken в теле; refreshToken уходит httpOnly-cookie и в теле ответа не появляется.",
+        "operationId": "login",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LoginDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Вход выполнен",
+            "headers": {
+              "Set-Cookie": {
+                "description": "httpOnly-cookie `refreshToken` на путь `/api/auth`. Из JS не читается; браузер приложит её сам, если запрос ушёл с `credentials: \"include\"`.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LoginResponseDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Невалидный запрос или ошибка валидации. Коды: `VALIDATION_ERROR`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorDto"
+                },
+                "examples": {
+                  "VALIDATION_ERROR": {
+                    "summary": "VALIDATION_ERROR",
+                    "value": {
+                      "code": "VALIDATION_ERROR",
+                      "message": "Проверьте правильность заполнения полей",
+                      "details": [
+                        {
+                          "field": "email",
+                          "message": "Некорректный email"
+                        }
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Нет авторизации или токен истёк. Коды: `INVALID_CREDENTIALS`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorDto"
+                },
+                "examples": {
+                  "INVALID_CREDENTIALS": {
+                    "summary": "INVALID_CREDENTIALS",
+                    "value": {
+                      "code": "INVALID_CREDENTIALS",
+                      "message": "Неверный email или пароль"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "summary": "Вход по email и паролю",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/auth/logout": {
+      "post": {
+        "description": "Гасит cookie с refresh-токеном. Токена в заголовке не требует и всегда отвечает 200 — выйти нужно уметь и тогда, когда access-токен уже протух. Сам access-токен остаётся валидным до конца своего срока: сервер его не отзывает, фронтенду нужно стереть токен у себя.",
+        "operationId": "logout",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Выход выполнен",
+            "headers": {
+              "Set-Cookie": {
+                "description": "httpOnly-cookie `refreshToken` на путь `/api/auth`. Из JS не читается; браузер приложит её сам, если запрос ушёл с `credentials: \"include\"`.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LogoutResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Выход из аккаунта",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/auth/me": {
+      "get": {
+        "description": "Требует заголовок `Authorization: Bearer <accessToken>`. По коду `TOKEN_EXPIRED` токен нужно молча обновить, по `UNAUTHORIZED` — показать форму входа.",
+        "operationId": "me",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Профиль пользователя",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserProfileDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Нет авторизации или токен истёк. Коды: `TOKEN_EXPIRED`, `UNAUTHORIZED`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorDto"
+                },
+                "examples": {
+                  "TOKEN_EXPIRED": {
+                    "summary": "TOKEN_EXPIRED",
+                    "value": {
+                      "code": "TOKEN_EXPIRED",
+                      "message": "Срок действия токена истёк. Войдите заново"
+                    }
+                  },
+                  "UNAUTHORIZED": {
+                    "summary": "UNAUTHORIZED",
+                    "value": {
+                      "code": "UNAUTHORIZED",
+                      "message": "Необходимо войти в аккаунт"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Профиль текущего пользователя",
+        "tags": [
+          "auth"
+        ]
+      }
+    }
+  },
+  "info": {
+    "title": "Inctagram API",
+    "description": "## Контракт\n\n- поля — `camelCase`;\n- `id` и все ссылочные поля (`userId`, `postId`) — строка UUID, не число;\n- даты — ISO 8601 в UTC: `2026-08-21T01:52:00.000Z`;\n- пустая коллекция — `[]`, никогда не `null`;\n- ошибка на любом статусе — `{ code, message, details? }`.\n\n`code` — стабильный машинный идентификатор в `UPPER_SNAKE_CASE`.\nВетвиться нужно по нему, а не по тексту `message`: текст меняется без\nпредупреждения, `code` — часть контракта. Конкретные коды перечислены\nв описании каждого ответа с ошибкой.\n\n## Авторизация\n\n1. `POST /api/auth/login` возвращает `accessToken` в теле и ставит\n   httpOnly-cookie `refreshToken` на путь `/api/auth`.\n2. Access-токен живёт 15 минут и уходит заголовком\n   `Authorization: Bearer <token>`.\n3. Cookie недоступна из JS — это защита от XSS. Запросы к API нужно слать\n   с `credentials: \"include\"`, иначе браузер её не приложит.\n4. `POST /api/auth/logout` гасит cookie. Access-токен при этом остаётся\n   валидным до конца своего срока — стереть его у себя должен фронтенд.\n\nДомен фронтенда должен быть перечислен в `CORS_ORIGINS` на сервере:\nиначе браузер не отдаст ответ и не пришлёт cookie.",
+    "version": "1.0",
+    "contact": {}
+  },
+  "tags": [
+    {
+      "name": "auth",
+      "description": "Вход, выход и профиль текущего пользователя. Access-токен приходит в теле ответа, refresh-токен — httpOnly-cookie."
+    },
+    {
+      "name": "health",
+      "description": "Проверка живости сервиса. Используется пробами Kubernetes."
+    }
+  ],
+  "servers": [
+    {
+      "url": "http://localhost:3000",
+      "description": "Локальный запуск"
+    }
+  ],
+  "components": {
+    "securitySchemes": {
+      "bearer": {
+        "scheme": "bearer",
+        "bearerFormat": "JWT",
+        "type": "http",
+        "description": "Access-токен из ответа POST /api/auth/login"
+      }
+    },
+    "schemas": {
+      "ErrorDetailDto": {
+        "type": "object",
+        "properties": {
+          "field": {
+            "type": "string",
+            "example": "email",
+            "description": "Поле запроса, к которому относится ошибка"
+          },
+          "message": {
+            "type": "string",
+            "example": "Некорректный email",
+            "description": "Текст ошибки для этого поля"
+          }
+        },
+        "required": [
+          "field",
+          "message"
+        ]
+      },
+      "ApiErrorDto": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "example": "VALIDATION_ERROR",
+            "description": "Стабильный машинный код ошибки в UPPER_SNAKE_CASE. Клиент ветвится по нему, а не по message"
+          },
+          "message": {
+            "type": "string",
+            "example": "Проверьте правильность заполнения полей",
+            "description": "Человекочитаемый текст для пользователя"
+          },
+          "details": {
+            "description": "Уточнения по полям, если ошибка относится к конкретным полям",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ErrorDetailDto"
+            }
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ]
+      },
+      "LoginDto": {
+        "type": "object",
+        "properties": {
+          "email": {
+            "type": "string",
+            "example": "anna.kovaleva@gmail.com",
+            "description": "Email зарегистрированного пользователя"
+          },
+          "password": {
+            "type": "string",
+            "example": "Password123!",
+            "minLength": 8,
+            "description": "Пароль от аккаунта"
+          }
+        },
+        "required": [
+          "email",
+          "password"
+        ]
+      },
+      "LoginResponseDto": {
+        "type": "object",
+        "properties": {
+          "accessToken": {
+            "type": "string",
+            "example": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+            "description": "JWT для заголовка Authorization: Bearer <token>. Живёт 15 минут"
+          }
+        },
+        "required": [
+          "accessToken"
+        ]
+      },
+      "LogoutResponseDto": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "example": true,
+            "description": "Всегда true: выход идемпотентен и не может не удаться"
+          }
+        },
+        "required": [
+          "success"
+        ]
+      },
+      "UserProfileDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "example": "3f8c1a94-2e7b-4d61-9c0a-5b1e2d4a7f01",
+            "format": "uuid",
+            "description": "Идентификатор пользователя"
+          },
+          "username": {
+            "type": "string",
+            "example": "anna_kovaleva"
+          },
+          "email": {
+            "type": "string",
+            "example": "anna.kovaleva@gmail.com"
+          },
+          "firstName": {
+            "type": "string",
+            "example": "Анна"
+          },
+          "lastName": {
+            "type": "string",
+            "example": "Ковалёва"
+          },
+          "createdAt": {
+            "type": "string",
+            "example": "2026-01-17T08:42:00.000Z",
+            "format": "date-time",
+            "description": "Дата регистрации, ISO 8601 в UTC"
+          }
+        },
+        "required": [
+          "id",
+          "username",
+          "email",
+          "firstName",
+          "lastName",
+          "createdAt"
+        ]
+      }
+    }
+  }
+}

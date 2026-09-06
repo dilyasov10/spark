@@ -1,0 +1,10 @@
+{
+  // Тот же приём, что в prisma/seed: ts-node запускает исходники, а не dist,
+  // поэтому проверку типов отключаем — её делает сборка.
+  "extends": "../tsconfig.json",
+  "ts-node": {
+    "transpileOnly": true,
+    "experimentalResolver": true,
+    "require": ["tsconfig-paths/register"]
+  }
+}

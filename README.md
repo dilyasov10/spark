@@ -128,6 +128,31 @@ $ pnpm start:prod:notifications
 
 Собрать что-то одно: `pnpm build:gateway`, `pnpm build:auth`, `pnpm build:notifications`.
 
+## API и Swagger
+
+Swagger — единственный источник правды по API (CLAUDE.md, правило 7).
+
+| Что | Где |
+|---|---|
+| Swagger UI | <http://localhost:3000/api/docs> |
+| Спека OpenAPI 3 | <http://localhost:3000/api/docs-json> |
+| Спека в репозитории | `openapi.json` |
+
+```bash
+# перегенерировать openapi.json — сервер, база и RabbitMQ не нужны
+$ pnpm swagger:json
+```
+
+`openapi.json` коммитится: по нему фронтенд генерирует типы и клиент, а изменение
+контракта видно в диффе пул-реквеста. После правки DTO или эндпоинта команду нужно
+прогнать, иначе файл разъедется с кодом.
+
+Адрес развёрнутого стенда попадает в спеку из переменной `PUBLIC_API_URL` — без неё
+в списке серверов остаётся только localhost.
+
+Как этим пользоваться со стороны фронтенда — [docs/api.md](docs/api.md): авторизация,
+CORS, формат ошибок, генерация клиента.
+
 ## Run tests
 
 ```bash

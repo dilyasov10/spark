@@ -3,7 +3,11 @@ import { ErrorDetailDto } from '../dto/api-error.dto';
 import { AppException } from '../errors/app.exception';
 import { ERROR_CODE } from '../errors/error-code';
 
-const VALIDATION_MESSAGE = 'Проверьте правильность заполнения полей';
+/**
+ * Текст ошибки валидации. Экспортируется, чтобы Swagger показывал фронтенду
+ * ровно то тело, которое отдаёт пайп, а не его копию, разъезжающуюся при правке.
+ */
+export const VALIDATION_MESSAGE = 'Проверьте правильность заполнения полей';
 
 /**
  * Разворачивает дерево ошибок class-validator в плоский список `{ field, message }`.
