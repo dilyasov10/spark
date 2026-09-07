@@ -55,3 +55,8 @@ spec:
                  secretKeyRef:
                    name: nest-backend-auth-production-config-secret
                    key: DATABASE_URL
+             - name: FRONTEND_URL
+               valueFrom:
+                 secretKeyRef:
+                   name: nest-backend-auth-production-config-secret
+                   key: FRONTEND_URL
