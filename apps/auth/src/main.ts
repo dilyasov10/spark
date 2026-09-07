@@ -15,12 +15,18 @@ import { AuthModule } from './auth.module';
 async function bootstrap() {
   const queue = envOrDefault('RABBITMQ_AUTH_QUEUE', RMQ_QUEUE.AUTH);
 
-  const app = await NestFactory.createMicroservice<MicroserviceOptions>(
-    AuthModule,
+  const app = await NestFactory.create(AuthModule);
+  app.setGlobalPrefix('/api/v1');
+
+  // inheritAppConfig — чтобы глобальный пайп и exception filter
+  // действовали и на обработчики сообщений, а не только на HTTP.
+  app.connectMicroservice<MicroserviceOptions>(
     rmqServerOptions({ url: requireEnv('RABBITMQ_URL'), queue }),
+    { inheritAppConfig: true },
   );
 
-  await app.listen();
+  await app.startAllMicroservices();
+  await app.listen(Number(process.env.PORT ?? 4418));
 
   Logger.log(`Auth слушает очередь ${queue}`, 'Bootstrap');
 }
