@@ -109,6 +109,7 @@ describe('Swagger (e2e)', () => {
 
     expect(errorCodes(login, 401)).toEqual([
       AUTH_ERROR_CODE.INVALID_CREDENTIALS,
+      AUTH_ERROR_CODE.EMAIL_NOT_CONFIRMED,
     ]);
     expect(errorCodes(login, 400)).toEqual([ERROR_CODE.VALIDATION_ERROR]);
   });

@@ -25,6 +25,297 @@
         ]
       }
     },
+    "/api/auth/registration": {
+      "post": {
+        "description": "Создаёт пользователя с isConfirmed=false и отправляет письмо с кодом.",
+        "operationId": "registration",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RegistrationDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "Пользователь создан"
+          },
+          "400": {
+            "description": "Невалидный запрос или ошибка валидации. Коды: `VALIDATION_ERROR`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorDto"
+                },
+                "examples": {
+                  "VALIDATION_ERROR": {
+                    "summary": "VALIDATION_ERROR",
+                    "value": {
+                      "code": "VALIDATION_ERROR",
+                      "message": "Проверьте правильность заполнения полей",
+                      "details": [
+                        {
+                          "field": "email",
+                          "message": "Некорректный email"
+                        }
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "summary": "Регистрация",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/auth/registration-confirmation": {
+      "post": {
+        "operationId": "registrationConfirmation",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RegistrationConfirmationDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "Email подтверждён"
+          },
+          "400": {
+            "description": "Невалидный запрос или ошибка валидации. Коды: `VALIDATION_ERROR`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorDto"
+                },
+                "examples": {
+                  "VALIDATION_ERROR": {
+                    "summary": "VALIDATION_ERROR",
+                    "value": {
+                      "code": "VALIDATION_ERROR",
+                      "message": "Проверьте правильность заполнения полей",
+                      "details": [
+                        {
+                          "field": "email",
+                          "message": "Некорректный email"
+                        }
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "summary": "Подтверждение email по коду из письма",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/auth/registration-email-resending": {
+      "post": {
+        "operationId": "registrationEmailResending",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RegistrationEmailResendingDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "Письмо отправлено повторно"
+          },
+          "400": {
+            "description": "Невалидный запрос или ошибка валидации. Коды: `VALIDATION_ERROR`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorDto"
+                },
+                "examples": {
+                  "VALIDATION_ERROR": {
+                    "summary": "VALIDATION_ERROR",
+                    "value": {
+                      "code": "VALIDATION_ERROR",
+                      "message": "Проверьте правильность заполнения полей",
+                      "details": [
+                        {
+                          "field": "email",
+                          "message": "Некорректный email"
+                        }
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Ресурс не найден. Коды: `NOT_FOUND`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorDto"
+                },
+                "examples": {
+                  "NOT_FOUND": {
+                    "summary": "NOT_FOUND",
+                    "value": {
+                      "code": "NOT_FOUND",
+                      "message": "Ресурс не найден"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "summary": "Повторная отправка письма подтверждения",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/auth/password-recovery": {
+      "post": {
+        "description": "Проверяет reCAPTCHA и отправляет письмо со ссылкой для смены пароля.",
+        "operationId": "passwordRecovery",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PasswordRecoveryDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "Письмо отправлено"
+          },
+          "400": {
+            "description": "Невалидный запрос или ошибка валидации. Коды: `VALIDATION_ERROR`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorDto"
+                },
+                "examples": {
+                  "VALIDATION_ERROR": {
+                    "summary": "VALIDATION_ERROR",
+                    "value": {
+                      "code": "VALIDATION_ERROR",
+                      "message": "Проверьте правильность заполнения полей",
+                      "details": [
+                        {
+                          "field": "email",
+                          "message": "Некорректный email"
+                        }
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Ресурс не найден. Коды: `NOT_FOUND`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorDto"
+                },
+                "examples": {
+                  "NOT_FOUND": {
+                    "summary": "NOT_FOUND",
+                    "value": {
+                      "code": "NOT_FOUND",
+                      "message": "Ресурс не найден"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "summary": "Восстановление пароля",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/auth/new-password": {
+      "post": {
+        "description": "Меняет пароль и инвалидирует все сессии пользователя.",
+        "operationId": "newPassword",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NewPasswordDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "Пароль обновлён"
+          },
+          "400": {
+            "description": "Невалидный запрос или ошибка валидации. Коды: `VALIDATION_ERROR`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorDto"
+                },
+                "examples": {
+                  "VALIDATION_ERROR": {
+                    "summary": "VALIDATION_ERROR",
+                    "value": {
+                      "code": "VALIDATION_ERROR",
+                      "message": "Проверьте правильность заполнения полей",
+                      "details": [
+                        {
+                          "field": "email",
+                          "message": "Некорректный email"
+                        }
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "summary": "Новый пароль по recovery-коду",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
     "/api/auth/login": {
       "post": {
         "description": "Возвращает accessToken в теле; refreshToken уходит httpOnly-cookie и в теле ответа не появляется.",
@@ -85,7 +376,7 @@
             }
           },
           "401": {
-            "description": "Нет авторизации или токен истёк. Коды: `INVALID_CREDENTIALS`",
+            "description": "Нет авторизации или токен истёк. Коды: `INVALID_CREDENTIALS`, `EMAIL_NOT_CONFIRMED`",
             "content": {
               "application/json": {
                 "schema": {
@@ -97,6 +388,13 @@
                     "value": {
                       "code": "INVALID_CREDENTIALS",
                       "message": "Неверный email или пароль"
+                    }
+                  },
+                  "EMAIL_NOT_CONFIRMED": {
+                    "summary": "EMAIL_NOT_CONFIRMED",
+                    "value": {
+                      "code": "EMAIL_NOT_CONFIRMED",
+                      "message": "Email не подтверждён. Перейдите по ссылке из письма или запросите новое"
                     }
                   }
                 }
@@ -271,6 +569,123 @@
         "required": [
           "code",
           "message"
+        ]
+      },
+      "RegistrationDto": {
+        "type": "object",
+        "properties": {
+          "username": {
+            "type": "string",
+            "example": "anna_kovaleva",
+            "description": "Уникальный username"
+          },
+          "email": {
+            "type": "string",
+            "example": "anna.kovaleva@gmail.com",
+            "description": "Email нового пользователя"
+          },
+          "password": {
+            "type": "string",
+            "example": "Password123!",
+            "minLength": 6,
+            "maxLength": 20,
+            "description": "Пароль от аккаунта"
+          },
+          "passwordConfirmation": {
+            "type": "string",
+            "example": "Password123!",
+            "description": "Подтверждение пароля"
+          },
+          "firstName": {
+            "type": "string",
+            "example": "Анна",
+            "description": "Имя"
+          },
+          "lastName": {
+            "type": "string",
+            "example": "Ковалёва",
+            "description": "Фамилия"
+          }
+        },
+        "required": [
+          "username",
+          "email",
+          "password",
+          "passwordConfirmation",
+          "firstName",
+          "lastName"
+        ]
+      },
+      "RegistrationConfirmationDto": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "example": "0f8fad5b-d9cb-469f-a165-70867728950e",
+            "description": "Код подтверждения из ссылки в письме"
+          }
+        },
+        "required": [
+          "code"
+        ]
+      },
+      "RegistrationEmailResendingDto": {
+        "type": "object",
+        "properties": {
+          "email": {
+            "type": "string",
+            "example": "anna.kovaleva@gmail.com",
+            "description": "Email неподтверждённого пользователя"
+          }
+        },
+        "required": [
+          "email"
+        ]
+      },
+      "PasswordRecoveryDto": {
+        "type": "object",
+        "properties": {
+          "email": {
+            "type": "string",
+            "example": "anna.kovaleva@gmail.com",
+            "description": "Email пользователя"
+          },
+          "recaptchaToken": {
+            "type": "string",
+            "example": "03AGdBq25...",
+            "description": "Токен Google reCAPTCHA v2 (checkbox) с фронтенда"
+          }
+        },
+        "required": [
+          "email",
+          "recaptchaToken"
+        ]
+      },
+      "NewPasswordDto": {
+        "type": "object",
+        "properties": {
+          "newPassword": {
+            "type": "string",
+            "example": "Password123!",
+            "minLength": 6,
+            "maxLength": 20,
+            "description": "Новый пароль"
+          },
+          "passwordConfirmation": {
+            "type": "string",
+            "example": "Password123!",
+            "description": "Подтверждение нового пароля"
+          },
+          "recoveryCode": {
+            "type": "string",
+            "example": "0f8fad5b-d9cb-469f-a165-70867728950e",
+            "description": "Код восстановления из ссылки в письме"
+          }
+        },
+        "required": [
+          "newPassword",
+          "passwordConfirmation",
+          "recoveryCode"
         ]
       },
       "LoginDto": {
