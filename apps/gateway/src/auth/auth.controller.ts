@@ -110,7 +110,10 @@ export class AuthController {
   @Post('registration-confirmation')
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({ summary: 'Подтверждение email по коду из письма' })
-  @ApiResponse({ status: HttpStatus.NO_CONTENT, description: 'Email подтверждён' })
+  @ApiResponse({
+    status: HttpStatus.NO_CONTENT,
+    description: 'Email подтверждён',
+  })
   @ApiErrorResponses(HttpStatus.BAD_REQUEST)
   async registrationConfirmation(
     @Body() dto: RegistrationConfirmationDto,
@@ -147,7 +150,10 @@ export class AuthController {
     description:
       'Проверяет reCAPTCHA и отправляет письмо со ссылкой для смены пароля.',
   })
-  @ApiResponse({ status: HttpStatus.NO_CONTENT, description: 'Письмо отправлено' })
+  @ApiResponse({
+    status: HttpStatus.NO_CONTENT,
+    description: 'Письмо отправлено',
+  })
   @ApiErrorResponses(HttpStatus.BAD_REQUEST, HttpStatus.NOT_FOUND)
   async passwordRecovery(@Body() dto: PasswordRecoveryDto): Promise<void> {
     // reCAPTCHA — на входе, до брокера: токен приходит из браузера, это
@@ -167,7 +173,10 @@ export class AuthController {
     summary: 'Новый пароль по recovery-коду',
     description: 'Меняет пароль и инвалидирует все сессии пользователя.',
   })
-  @ApiResponse({ status: HttpStatus.NO_CONTENT, description: 'Пароль обновлён' })
+  @ApiResponse({
+    status: HttpStatus.NO_CONTENT,
+    description: 'Пароль обновлён',
+  })
   @ApiErrorResponses(HttpStatus.BAD_REQUEST)
   async newPassword(@Body() dto: NewPasswordDto): Promise<void> {
     await sendRpc<void, NewPasswordCommand>(

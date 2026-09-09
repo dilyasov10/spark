@@ -55,9 +55,7 @@ export class AuthController {
   }
 
   @MessagePattern(AUTH_PATTERN.PASSWORD_RECOVERY)
-  passwordRecovery(
-    @Payload() command: PasswordRecoveryCommand,
-  ): Promise<void> {
+  passwordRecovery(@Payload() command: PasswordRecoveryCommand): Promise<void> {
     return this.authService.passwordRecovery(command);
   }
 

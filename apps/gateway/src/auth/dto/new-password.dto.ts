@@ -32,7 +32,9 @@ export class NewPasswordDto {
   @MaxLength(PASSWORD_MAX_LENGTH, {
     message: `Пароль не длиннее ${PASSWORD_MAX_LENGTH} символов`,
   })
-  @Matches(PASSWORD_PATTERN, { message: 'Пароль содержит недопустимые символы' })
+  @Matches(PASSWORD_PATTERN, {
+    message: 'Пароль содержит недопустимые символы',
+  })
   @Matches(PASSWORD_COMPLEXITY_PATTERN, {
     message:
       'Пароль должен содержать хотя бы одну цифру, одну строчную и одну заглавную букву',

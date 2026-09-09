@@ -69,7 +69,12 @@ describe('AuthService', () => {
 
   it('возвращает пару токенов при верных учётных данных', async () => {
     // Arrange
-    findUnique.mockResolvedValue({ id: USER_ID, email: EMAIL, passwordHash, isConfirmed: true });
+    findUnique.mockResolvedValue({
+      id: USER_ID,
+      email: EMAIL,
+      passwordHash,
+      isConfirmed: true,
+    });
 
     // Act
     const tokens = await service.login({
@@ -86,7 +91,12 @@ describe('AuthService', () => {
 
   it('кладёт в payload только id и email', async () => {
     // Arrange
-    findUnique.mockResolvedValue({ id: USER_ID, email: EMAIL, passwordHash, isConfirmed: true });
+    findUnique.mockResolvedValue({
+      id: USER_ID,
+      email: EMAIL,
+      passwordHash,
+      isConfirmed: true,
+    });
 
     // Act
     await service.login({ email: EMAIL, password: VALID_PASSWORD });
@@ -101,7 +111,12 @@ describe('AuthService', () => {
 
   it('подписывает refresh-токен отдельным секретом', async () => {
     // Arrange
-    findUnique.mockResolvedValue({ id: USER_ID, email: EMAIL, passwordHash, isConfirmed: true });
+    findUnique.mockResolvedValue({
+      id: USER_ID,
+      email: EMAIL,
+      passwordHash,
+      isConfirmed: true,
+    });
 
     // Act
     await service.login({ email: EMAIL, password: VALID_PASSWORD });
@@ -131,7 +146,12 @@ describe('AuthService', () => {
 
   it('кидает INVALID_CREDENTIALS со статусом 401, когда пароль неверный', async () => {
     // Arrange
-    findUnique.mockResolvedValue({ id: USER_ID, email: EMAIL, passwordHash, isConfirmed: true });
+    findUnique.mockResolvedValue({
+      id: USER_ID,
+      email: EMAIL,
+      passwordHash,
+      isConfirmed: true,
+    });
 
     // Act
     const error = await captureError(

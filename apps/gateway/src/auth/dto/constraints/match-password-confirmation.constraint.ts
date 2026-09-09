@@ -5,9 +5,7 @@ import {
 } from 'class-validator';
 
 @ValidatorConstraint({ name: 'matchPasswordConfirmation', async: false })
-export class MatchPasswordConfirmationConstraint
-  implements ValidatorConstraintInterface
-{
+export class MatchPasswordConfirmationConstraint implements ValidatorConstraintInterface {
   validate(passwordConfirmation: unknown, args: ValidationArguments): boolean {
     // RegistrationDto — `password`, NewPasswordDto — `newPassword`.
     const object = args.object as {

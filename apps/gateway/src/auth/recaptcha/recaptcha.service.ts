@@ -64,7 +64,10 @@ export class RecaptchaService {
       message: AUTH_ERROR_MESSAGE.RECAPTCHA_FAILED,
       status: HttpStatus.BAD_REQUEST,
       details: [
-        { field: 'recaptchaToken', message: AUTH_ERROR_MESSAGE.RECAPTCHA_FAILED },
+        {
+          field: 'recaptchaToken',
+          message: AUTH_ERROR_MESSAGE.RECAPTCHA_FAILED,
+        },
       ],
     });
   }
