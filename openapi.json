@@ -1,7 +1,7 @@
 {
   "openapi": "3.0.0",
   "paths": {
-    "/api": {
+    "/api/v1": {
       "get": {
         "description": "Отвечает 200, пока процесс жив. Сюда ходят readiness- и liveness-пробы Kubernetes (apps/gateway/deployment.yaml); состояние базы и брокера эндпоинт не проверяет. Фронтенду не нужен.",
         "operationId": "getHello",
@@ -25,7 +25,7 @@
         ]
       }
     },
-    "/api/auth/registration": {
+    "/api/v1/auth/registration": {
       "post": {
         "description": "Создаёт пользователя с isConfirmed=false и отправляет письмо с кодом.",
         "operationId": "registration",
@@ -76,7 +76,7 @@
         ]
       }
     },
-    "/api/auth/registration-confirmation": {
+    "/api/v1/auth/registration-confirmation": {
       "post": {
         "operationId": "registrationConfirmation",
         "parameters": [],
@@ -126,7 +126,7 @@
         ]
       }
     },
-    "/api/auth/registration-email-resending": {
+    "/api/v1/auth/registration-email-resending": {
       "post": {
         "operationId": "registrationEmailResending",
         "parameters": [],
@@ -195,7 +195,7 @@
         ]
       }
     },
-    "/api/auth/password-recovery": {
+    "/api/v1/auth/password-recovery": {
       "post": {
         "description": "Проверяет reCAPTCHA и отправляет письмо со ссылкой для смены пароля.",
         "operationId": "passwordRecovery",
@@ -265,7 +265,7 @@
         ]
       }
     },
-    "/api/auth/new-password": {
+    "/api/v1/auth/new-password": {
       "post": {
         "description": "Меняет пароль и инвалидирует все сессии пользователя.",
         "operationId": "newPassword",
@@ -316,7 +316,7 @@
         ]
       }
     },
-    "/api/auth/login": {
+    "/api/v1/auth/login": {
       "post": {
         "description": "Возвращает accessToken в теле; refreshToken уходит httpOnly-cookie и в теле ответа не появляется.",
         "operationId": "login",
@@ -336,7 +336,7 @@
             "description": "Вход выполнен",
             "headers": {
               "Set-Cookie": {
-                "description": "httpOnly-cookie `refreshToken` на путь `/api/auth`. Из JS не читается; браузер приложит её сам, если запрос ушёл с `credentials: \"include\"`.",
+                "description": "httpOnly-cookie `refreshToken` на путь `/api/v1/auth`. Из JS не читается; браузер приложит её сам, если запрос ушёл с `credentials: \"include\"`.",
                 "schema": {
                   "type": "string"
                 }
@@ -408,7 +408,7 @@
         ]
       }
     },
-    "/api/auth/logout": {
+    "/api/v1/auth/logout": {
       "post": {
         "description": "Гасит cookie с refresh-токеном. Токена в заголовке не требует и всегда отвечает 200 — выйти нужно уметь и тогда, когда access-токен уже протух. Сам access-токен остаётся валидным до конца своего срока: сервер его не отзывает, фронтенду нужно стереть токен у себя.",
         "operationId": "logout",
@@ -418,7 +418,7 @@
             "description": "Выход выполнен",
             "headers": {
               "Set-Cookie": {
-                "description": "httpOnly-cookie `refreshToken` на путь `/api/auth`. Из JS не читается; браузер приложит её сам, если запрос ушёл с `credentials: \"include\"`.",
+                "description": "httpOnly-cookie `refreshToken` на путь `/api/v1/auth`. Из JS не читается; браузер приложит её сам, если запрос ушёл с `credentials: \"include\"`.",
                 "schema": {
                   "type": "string"
                 }
@@ -439,7 +439,7 @@
         ]
       }
     },
-    "/api/auth/me": {
+    "/api/v1/auth/me": {
       "get": {
         "description": "Требует заголовок `Authorization: Bearer <accessToken>`. По коду `TOKEN_EXPIRED` токен нужно молча обновить, по `UNAUTHORIZED` — показать форму входа.",
         "operationId": "me",
@@ -496,7 +496,7 @@
   },
   "info": {
     "title": "Inctagram API",
-    "description": "## Контракт\n\n- поля — `camelCase`;\n- `id` и все ссылочные поля (`userId`, `postId`) — строка UUID, не число;\n- даты — ISO 8601 в UTC: `2026-08-21T01:52:00.000Z`;\n- пустая коллекция — `[]`, никогда не `null`;\n- ошибка на любом статусе — `{ code, message, details? }`.\n\n`code` — стабильный машинный идентификатор в `UPPER_SNAKE_CASE`.\nВетвиться нужно по нему, а не по тексту `message`: текст меняется без\nпредупреждения, `code` — часть контракта. Конкретные коды перечислены\nв описании каждого ответа с ошибкой.\n\n## Авторизация\n\n1. `POST /api/auth/login` возвращает `accessToken` в теле и ставит\n   httpOnly-cookie `refreshToken` на путь `/api/auth`.\n2. Access-токен живёт 15 минут и уходит заголовком\n   `Authorization: Bearer <token>`.\n3. Cookie недоступна из JS — это защита от XSS. Запросы к API нужно слать\n   с `credentials: \"include\"`, иначе браузер её не приложит.\n4. `POST /api/auth/logout` гасит cookie. Access-токен при этом остаётся\n   валидным до конца своего срока — стереть его у себя должен фронтенд.\n\nДомен фронтенда должен быть перечислен в `CORS_ORIGINS` на сервере:\nиначе браузер не отдаст ответ и не пришлёт cookie.",
+    "description": "## Контракт\n\n- поля — `camelCase`;\n- `id` и все ссылочные поля (`userId`, `postId`) — строка UUID, не число;\n- даты — ISO 8601 в UTC: `2026-08-21T01:52:00.000Z`;\n- пустая коллекция — `[]`, никогда не `null`;\n- ошибка на любом статусе — `{ code, message, details? }`.\n\n`code` — стабильный машинный идентификатор в `UPPER_SNAKE_CASE`.\nВетвиться нужно по нему, а не по тексту `message`: текст меняется без\nпредупреждения, `code` — часть контракта. Конкретные коды перечислены\nв описании каждого ответа с ошибкой.\n\n## Авторизация\n\n1. `POST /api/v1/auth/login` возвращает `accessToken` в теле и ставит\n   httpOnly-cookie `refreshToken` на путь `/api/v1/auth`.\n2. Access-токен живёт 15 минут и уходит заголовком\n   `Authorization: Bearer <token>`.\n3. Cookie недоступна из JS — это защита от XSS. Запросы к API нужно слать\n   с `credentials: \"include\"`, иначе браузер её не приложит.\n4. `POST /api/v1/auth/logout` гасит cookie. Access-токен при этом остаётся\n   валидным до конца своего срока — стереть его у себя должен фронтенд.\n\nДомен фронтенда должен быть перечислен в `CORS_ORIGINS` на сервере:\nиначе браузер не отдаст ответ и не пришлёт cookie.",
     "version": "1.0",
     "contact": {}
   },
@@ -522,7 +522,7 @@
         "scheme": "bearer",
         "bearerFormat": "JWT",
         "type": "http",
-        "description": "Access-токен из ответа POST /api/auth/login"
+        "description": "Access-токен из ответа POST /api/v1/auth/login"
       }
     },
     "schemas": {

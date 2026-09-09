@@ -6,7 +6,7 @@ import { SWAGGER_PATH, setupApp, setupSwagger } from '@app/common';
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
 
-  // Префикс — до Swagger: иначе он соберёт спеку по путям без `/api`.
+  // Префикс — до Swagger: иначе он соберёт спеку по путям без `/api/v1`.
   setupApp(app);
   setupSwagger(app);
 

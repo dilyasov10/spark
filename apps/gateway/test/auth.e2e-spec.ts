@@ -79,19 +79,19 @@ describe('Авторизация (e2e)', () => {
 
   async function login(password: string = PASSWORD): Promise<string> {
     const response = await request(app.getHttpServer())
-      .post('/api/auth/login')
+      .post('/api/v1/auth/login')
       .send({ email: USER.email, password })
       .expect(HttpStatus.OK);
 
     return (response.body as { accessToken: string }).accessToken;
   }
 
-  describe('POST /api/auth/login', () => {
+  describe('POST /api/v1/auth/login', () => {
     it('отвечает 200, а не 201, и отдаёт accessToken', async () => {
       // Arrange
       // Act
       const response = await request(app.getHttpServer())
-        .post('/api/auth/login')
+        .post('/api/v1/auth/login')
         .send({ email: USER.email, password: PASSWORD })
         .expect(HttpStatus.OK);
 
@@ -105,7 +105,7 @@ describe('Авторизация (e2e)', () => {
       // Arrange
       // Act
       const response = await request(app.getHttpServer())
-        .post('/api/auth/login')
+        .post('/api/v1/auth/login')
         .send({ email: USER.email, password: PASSWORD })
         .expect(HttpStatus.OK);
 
@@ -117,7 +117,7 @@ describe('Авторизация (e2e)', () => {
 
       expect(refreshCookie).toBeDefined();
       expect(refreshCookie).toContain('HttpOnly');
-      expect(refreshCookie).toContain('Path=/api/auth');
+      expect(refreshCookie).toContain('Path=/api/v1/auth');
       expect(Object.keys(response.body as object)).toEqual(['accessToken']);
     });
 
@@ -125,7 +125,7 @@ describe('Авторизация (e2e)', () => {
       // Arrange
       // Act
       const response = await request(app.getHttpServer())
-        .post('/api/auth/login')
+        .post('/api/v1/auth/login')
         .send({ email: USER.email, password: PASSWORD })
         .expect(HttpStatus.OK);
 
@@ -138,7 +138,7 @@ describe('Авторизация (e2e)', () => {
       // Arrange
       // Act
       const response = await request(app.getHttpServer())
-        .post('/api/auth/login')
+        .post('/api/v1/auth/login')
         .send({ email: USER.email, password: 'WrongPassword1!' })
         .expect(HttpStatus.UNAUTHORIZED);
 
@@ -152,12 +152,12 @@ describe('Авторизация (e2e)', () => {
       // Arrange
       // Act
       const wrongPassword = await request(app.getHttpServer())
-        .post('/api/auth/login')
+        .post('/api/v1/auth/login')
         .send({ email: USER.email, password: 'WrongPassword1!' })
         .expect(HttpStatus.UNAUTHORIZED);
 
       const unknownEmail = await request(app.getHttpServer())
-        .post('/api/auth/login')
+        .post('/api/v1/auth/login')
         .send({ email: 'nobody@example.com', password: PASSWORD })
         .expect(HttpStatus.UNAUTHORIZED);
 
@@ -169,7 +169,7 @@ describe('Авторизация (e2e)', () => {
       // Arrange
       // Act
       const response = await request(app.getHttpServer())
-        .post('/api/auth/login')
+        .post('/api/v1/auth/login')
         .send({ email: 'not-an-email', password: 'short' })
         .expect(HttpStatus.BAD_REQUEST);
 
@@ -185,7 +185,7 @@ describe('Авторизация (e2e)', () => {
       // Arrange
       // Act
       const response = await request(app.getHttpServer())
-        .post('/api/auth/login')
+        .post('/api/v1/auth/login')
         .send({ email: USER.email, password: PASSWORD, role: 'admin' })
         .expect(HttpStatus.BAD_REQUEST);
 
@@ -196,12 +196,12 @@ describe('Авторизация (e2e)', () => {
     });
   });
 
-  describe('POST /api/auth/logout', () => {
+  describe('POST /api/v1/auth/logout', () => {
     it('отвечает 200, а не 201, и подтверждает выход', async () => {
       // Arrange
       // Act
       const response = await request(app.getHttpServer())
-        .post('/api/auth/logout')
+        .post('/api/v1/auth/logout')
         .expect(HttpStatus.OK);
 
       // Assert
@@ -212,7 +212,7 @@ describe('Авторизация (e2e)', () => {
       // Arrange
       // Act
       const response = await request(app.getHttpServer())
-        .post('/api/auth/logout')
+        .post('/api/v1/auth/logout')
         .expect(HttpStatus.OK);
 
       // Assert
@@ -227,13 +227,13 @@ describe('Авторизация (e2e)', () => {
       // Arrange: с другим Path или SameSite браузер счёл бы cookie чужой
       // и оставил бы refresh-токен жить после выхода.
       const loginResponse = await request(app.getHttpServer())
-        .post('/api/auth/login')
+        .post('/api/v1/auth/login')
         .send({ email: USER.email, password: PASSWORD })
         .expect(HttpStatus.OK);
 
       // Act
       const logoutResponse = await request(app.getHttpServer())
-        .post('/api/auth/logout')
+        .post('/api/v1/auth/logout')
         .expect(HttpStatus.OK);
 
       // Assert
@@ -250,7 +250,7 @@ describe('Авторизация (e2e)', () => {
 
       // Act
       const response = await request(app.getHttpServer())
-        .post('/api/auth/logout')
+        .post('/api/v1/auth/logout')
         .set('Authorization', `Bearer ${forgedToken}`)
         .expect(HttpStatus.OK);
 
@@ -259,14 +259,14 @@ describe('Авторизация (e2e)', () => {
     });
   });
 
-  describe('GET /api/auth/me', () => {
+  describe('GET /api/v1/auth/me', () => {
     it('отдаёт профиль по валидному токену', async () => {
       // Arrange
       const accessToken = await login();
 
       // Act
       const response = await request(app.getHttpServer())
-        .get('/api/auth/me')
+        .get('/api/v1/auth/me')
         .set('Authorization', `Bearer ${accessToken}`)
         .expect(HttpStatus.OK);
 
@@ -285,7 +285,7 @@ describe('Авторизация (e2e)', () => {
       // Arrange
       // Act
       const response = await request(app.getHttpServer())
-        .get('/api/auth/me')
+        .get('/api/v1/auth/me')
         .expect(HttpStatus.UNAUTHORIZED);
 
       // Assert
@@ -303,7 +303,7 @@ describe('Авторизация (e2e)', () => {
 
       // Act
       const response = await request(app.getHttpServer())
-        .get('/api/auth/me')
+        .get('/api/v1/auth/me')
         .set('Authorization', `Bearer ${forgedToken}`)
         .expect(HttpStatus.UNAUTHORIZED);
 

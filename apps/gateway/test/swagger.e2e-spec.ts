@@ -83,7 +83,7 @@ describe('Swagger (e2e)', () => {
     await app.close();
   });
 
-  it('описывает все роуты с префиксом /api', () => {
+  it('описывает все роуты с префиксом /api/v1', () => {
     const paths = Object.keys(document.paths);
 
     expect(paths.length).toBeGreaterThan(0);
@@ -105,7 +105,7 @@ describe('Swagger (e2e)', () => {
   });
 
   it('перечисляет доменные коды ошибок входа', () => {
-    const login = operationAt(document, '/api/auth/login', 'post');
+    const login = operationAt(document, '/api/v1/auth/login', 'post');
 
     expect(errorCodes(login, 401)).toEqual([
       AUTH_ERROR_CODE.INVALID_CREDENTIALS,
@@ -117,7 +117,7 @@ describe('Swagger (e2e)', () => {
   it('различает протухший токен и отсутствие авторизации', () => {
     // Фронтенду это разные ветки: по TOKEN_EXPIRED токен молча обновляют,
     // по UNAUTHORIZED показывают форму входа.
-    const me = operationAt(document, '/api/auth/me', 'get');
+    const me = operationAt(document, '/api/v1/auth/me', 'get');
 
     expect(errorCodes(me, 401)).toEqual([
       AUTH_ERROR_CODE.TOKEN_EXPIRED,
@@ -126,8 +126,8 @@ describe('Swagger (e2e)', () => {
   });
 
   it('показывает Set-Cookie у входа и выхода', () => {
-    const login = operationAt(document, '/api/auth/login', 'post');
-    const logout = operationAt(document, '/api/auth/logout', 'post');
+    const login = operationAt(document, '/api/v1/auth/login', 'post');
+    const logout = operationAt(document, '/api/v1/auth/logout', 'post');
 
     // Refresh-токен в теле ответа не появляется — без заголовка в спеке
     // фронтенд не увидит, что эндпоинты вообще трогают cookie.

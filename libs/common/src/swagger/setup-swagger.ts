@@ -6,7 +6,7 @@ import { ApiErrorDto, ErrorDetailDto } from '../dto/api-error.dto';
 
 /**
  * `SwaggerModule.setup` вешает маршрут в обход глобального префикса, поэтому
- * префикс подставляем сами — адрес UI остаётся `/api/docs`.
+ * префикс подставляем сами — адрес UI остаётся `/api/v1/docs`.
  */
 export const SWAGGER_PATH = `${API_PREFIX}/docs`;
 
@@ -43,13 +43,13 @@ const DESCRIPTION = [
   '',
   '## Авторизация',
   '',
-  '1. `POST /api/auth/login` возвращает `accessToken` в теле и ставит',
-  '   httpOnly-cookie `refreshToken` на путь `/api/auth`.',
+  '1. `POST /api/v1/auth/login` возвращает `accessToken` в теле и ставит',
+  '   httpOnly-cookie `refreshToken` на путь `/api/v1/auth`.',
   '2. Access-токен живёт 15 минут и уходит заголовком',
   '   `Authorization: Bearer <token>`.',
   '3. Cookie недоступна из JS — это защита от XSS. Запросы к API нужно слать',
   '   с `credentials: "include"`, иначе браузер её не приложит.',
-  '4. `POST /api/auth/logout` гасит cookie. Access-токен при этом остаётся',
+  '4. `POST /api/v1/auth/logout` гасит cookie. Access-токен при этом остаётся',
   '   валидным до конца своего срока — стереть его у себя должен фронтенд.',
   '',
   'Домен фронтенда должен быть перечислен в `CORS_ORIGINS` на сервере:',
@@ -60,7 +60,7 @@ const DESCRIPTION = [
  * Адреса, по которым API реально доступен. Без них сгенерированный клиент не
  * знает базового URL, а «Try it out» в UI бьёт в текущий origin.
  *
- * Путь `/api` сюда не входит: он уже есть в самих путях спеки.
+ * Путь `/api/v1` сюда не входит: он уже есть в самих путях спеки.
  */
 function applyServers(builder: DocumentBuilder): void {
   const publicUrl = process.env.PUBLIC_API_URL?.trim();
@@ -118,7 +118,7 @@ export function buildOpenApiDocument(app: INestApplication): OpenAPIObject {
       type: 'http',
       scheme: 'bearer',
       bearerFormat: 'JWT',
-      description: 'Access-токен из ответа POST /api/auth/login',
+      description: 'Access-токен из ответа POST /api/v1/auth/login',
     });
 
   TAGS.forEach(({ name, description }) => builder.addTag(name, description));

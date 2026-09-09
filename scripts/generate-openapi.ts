@@ -45,7 +45,7 @@ async function generate(): Promise<void> {
 
   const app = await NestFactory.create(AppModule, { logger: false });
 
-  // Префикс — до сборки документа: иначе пути окажутся без `/api`,
+  // Префикс — до сборки документа: иначе пути окажутся без `/api/v1`,
   // и сгенерированный клиент будет бить мимо всех эндпоинтов.
   setupApp(app);
 

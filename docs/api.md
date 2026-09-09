@@ -6,14 +6,14 @@
 
 | Что | Где |
 |---|---|
-| Swagger UI | `{BASE_URL}/api/docs` |
-| Спека OpenAPI 3 | `{BASE_URL}/api/docs-json` |
+| Swagger UI | `{BASE_URL}/api/v1/docs` |
+| Спека OpenAPI 3 | `{BASE_URL}/api/v1/docs-json` |
 | Спека в репозитории | `openapi.json` в корне |
 
 Локально `BASE_URL` — `http://localhost:3000`, то есть UI живёт на
-<http://localhost:3000/api/docs>.
+<http://localhost:3000/api/v1/docs>.
 
-Все роуты начинаются с `/api`: контроллер `auth` наружу доступен как `/api/auth/...`.
+Все роуты начинаются с `/api/v1`: контроллер `auth` наружу доступен как `/api/v1/auth/...`.
 
 ## Генерация клиента
 
@@ -23,7 +23,7 @@
 фронтенд.
 
 Забрать спеку можно тремя способами: из файла в репозитории, с живого стенда по
-`/api/docs-json` или из артефакта сборки. Дальше — любой генератор, например:
+`/api/v1/docs-json` или из артефакта сборки. Дальше — любой генератор, например:
 
 ```bash
 # только типы
@@ -39,17 +39,17 @@ pnpm dlx orval --input openapi.json --output src/shared/api/generated.ts
 
 ## Авторизация
 
-1. `POST /api/auth/login` возвращает `accessToken` в теле и ставит httpOnly-cookie
-   `refreshToken` на путь `/api/auth`.
+1. `POST /api/v1/auth/login` возвращает `accessToken` в теле и ставит httpOnly-cookie
+   `refreshToken` на путь `/api/v1/auth`.
 2. Access-токен живёт 15 минут и уходит заголовком `Authorization: Bearer <accessToken>`.
 3. Cookie из JS не читается — это защита от XSS. Чтобы браузер её принял и присылал,
    запросы должны идти с `credentials: "include"`.
-4. `POST /api/auth/logout` гасит cookie. Токен не требует и всегда отвечает `200`: выйти
+4. `POST /api/v1/auth/logout` гасит cookie. Токен не требует и всегда отвечает `200`: выйти
    нужно уметь и с протухшим access-токеном. Сам access-токен сервер не отзывает — он
    остаётся валидным до конца своего срока, стереть его у себя должен фронтенд.
 
 ```ts
-const response = await fetch(`${BASE_URL}/api/auth/login`, {
+const response = await fetch(`${BASE_URL}/api/v1/auth/login`, {
   method: 'POST',
   headers: { 'Content-Type': 'application/json' },
   credentials: 'include', // без этого cookie не сохранится

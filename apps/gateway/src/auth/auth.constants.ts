@@ -7,7 +7,7 @@ export const REFRESH_TOKEN_COOKIE = 'refreshToken';
 /**
  * Cookie видна только auth-роутам: остальные эндпоинты refresh-токен не читают,
  * и слать его им незачем. Путь обязан учитывать глобальный префикс — cookie,
- * выданную на `/auth`, браузер на `/api/auth/...` уже не пришлёт.
+ * выданную на `/auth`, браузер на `/api/v1/auth/...` уже не пришлёт.
  */
 export const REFRESH_TOKEN_COOKIE_PATH = `/${API_PREFIX}/auth`;
 
