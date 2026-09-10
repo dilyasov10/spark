@@ -1,7 +1,7 @@
 import 'dotenv/config';
 import * as bcrypt from 'bcrypt';
 import { PrismaPg } from '@prisma/adapter-pg';
-import { PrismaClient } from '../../src/generated/prisma/client';
+import { PrismaClient } from '../../libs/prisma/src/generated/prisma/client';
 import { describeTarget, resolveConnectionString } from './connection';
 import { assertLocalEnvironment } from './guard';
 import { SEED_POSTS } from './posts';

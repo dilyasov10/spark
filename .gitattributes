@@ -1,0 +1,15 @@
+# Переводы строк нормализуются в LF при коммите, в рабочей копии — по
+# настройке разработчика.
+* text=auto
+
+# Файлы, которые исполняются на Linux-агенте Jenkins и внутри образа. CRLF в
+# них ломает шебанг: `/bin/bash^M: bad interpreter`. Здесь LF принудительно, вне
+# зависимости от core.autocrlf на машине разработчика.
+*.sh text eol=lf
+Dockerfile text eol=lf
+Jenkinsfile text eol=lf
+Jenkinsfile.* text eol=lf
+
+# Манифесты уходят в kubectl как есть — держим их в том же виде, что и скрипты.
+*.yaml text eol=lf
+*.yml text eol=lf

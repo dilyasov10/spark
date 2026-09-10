@@ -10,10 +10,11 @@ dist
 build
 
 # Клиент Prisma генерируется в образе (pnpm db:generate)
-src/generated
+libs/prisma/src/generated
 
-# В рантайме не нужны
-test
+# В рантайме не нужны. Тесты в монорепе лежат по apps/<app>/test, поэтому
+# шаблон со звёздочкой, а не просто `test`.
+**/test
 **/*.spec.ts
 coverage
 *.tsbuildinfo
